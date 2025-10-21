@@ -4,6 +4,9 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
 
+// Routes
+const authRoutes = require('../routes/authRoutes');
+
 const app = express();
 const server = http.createServer(app);
 
@@ -11,6 +14,11 @@ const PORT = process.env.PORT || 4000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 app.use(cors({ origin: CORS_ORIGIN }));
+app.use(express.json());
+
+// API Routes
+app.use('/api/auth', authRoutes);
+
 app.get('/', (_req, res) => {
   res.send('WebSocket server is running');
 });
@@ -21,6 +29,9 @@ const io = new Server(server, {
     methods: ['GET', 'POST']
   }
 });
+
+// 인증 미들웨어 적용 (선택적)
+// io.use(require('../middleware/authMiddleware').socketAuthMiddleware);
 
 // In-memory room state (demo only)
 const roomIdToMessages = new Map(); // roomId -> message[]
