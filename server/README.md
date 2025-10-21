@@ -6,15 +6,15 @@
 server/
 ├── src/
 │   ├── index.js              # 메인 서버 파일 (Socket.IO + Express)
-│   └── supabaseClient.js     # Supabase 클라이언트 설정
-├── routes/
-│   └── authRoutes.js         # 인증 관련 API 라우트
-├── services/
-│   └── authService.js        # 인증 비즈니스 로직
-├── repositories/
-│   └── userRepository.js     # 사용자 데이터 액세스
-├── middleware/
-│   └── authMiddleware.js     # 인증 미들웨어
+│   ├── supabaseClient.js     # Supabase 클라이언트 설정
+│   ├── routes/
+│   │   └── authRoutes.js     # 인증 관련 API 라우트
+│   ├── services/
+│   │   └── authService.js    # 인증 비즈니스 로직
+│   ├── repositories/
+│   │   └── userRepository.js # 사용자 데이터 액세스
+│   └── middleware/
+│       └── authMiddleware.js # 인증 미들웨어
 ├── package.json
 └── .env                      # 환경 변수
 ```

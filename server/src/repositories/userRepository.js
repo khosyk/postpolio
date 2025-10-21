@@ -1,4 +1,4 @@
-const supabase = require('../src/supabaseClient');
+const supabase = require('./supabaseClient');
 
 class UserRepository {
   // 사용자 프로필 생성

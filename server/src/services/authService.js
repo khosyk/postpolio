@@ -1,4 +1,4 @@
-const supabase = require('../src/supabaseClient');
+const supabase = require('./supabaseClient');
 const userRepository = require('../repositories/userRepository');
 
 class AuthService {

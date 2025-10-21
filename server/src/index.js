@@ -5,7 +5,7 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 
 // Routes
-const authRoutes = require('../routes/authRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -31,7 +31,7 @@ const io = new Server(server, {
 });
 
 // 인증 미들웨어 적용 (선택적)
-// io.use(require('../middleware/authMiddleware').socketAuthMiddleware);
+// io.use(require('./middleware/authMiddleware').socketAuthMiddleware);
 
 // In-memory room state (demo only)
 const roomIdToMessages = new Map(); // roomId -> message[]
