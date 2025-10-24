@@ -24,9 +24,11 @@ server/
 ### 인증 (Authentication)
 
 #### POST `/api/auth/signup`
+
 이메일 회원가입
 
 **Request Body:**
+
 ```json
 {
   "email": "user@example.com",
@@ -37,6 +39,7 @@ server/
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -57,9 +60,11 @@ server/
 ```
 
 #### POST `/api/auth/signin`
+
 이메일 로그인
 
 **Request Body:**
+
 ```json
 {
   "email": "user@example.com",
@@ -68,6 +73,7 @@ server/
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -89,9 +95,11 @@ server/
 ```
 
 #### POST `/api/auth/verify`
+
 토큰 검증
 
 **Request Body:**
+
 ```json
 {
   "token": "jwt-token"
@@ -99,9 +107,11 @@ server/
 ```
 
 #### PUT `/api/auth/profile`
+
 프로필 업데이트
 
 **Request Body:**
+
 ```json
 {
   "userId": "user-uuid",
@@ -113,12 +123,14 @@ server/
 ## Socket.IO 이벤트
 
 ### 클라이언트 → 서버
+
 - `join` - 방 참여
 - `message` - 메시지 전송
 - `leave` - 방 나가기
 - `clearHistory` - 채팅 기록 삭제
 
 ### 서버 → 클라이언트
+
 - `joined` - 방 참여 확인
 - `message` - 메시지 수신
 - `system` - 시스템 알림 (입장/퇴장)
@@ -149,6 +161,7 @@ npm start
 ## 데이터베이스 스키마
 
 ### user_profiles 테이블
+
 ```sql
 CREATE TABLE user_profiles (
   id SERIAL PRIMARY KEY,

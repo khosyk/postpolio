@@ -1,8 +1,9 @@
-const supabase = require('./supabaseClient');
+import supabase from './supabaseClient';
+import { UserProfile } from '../types';
 
 class UserRepository {
   // 사용자 프로필 생성
-  async createUserProfile(userId, userData) {
+  async createUserProfile(userId: string, userData: Partial<UserProfile>): Promise<UserProfile> {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -10,10 +11,10 @@ class UserRepository {
           {
             user_id: userId,
             email: userData.email,
-            display_name: userData.displayName,
+            display_name: userData.display_name,
             avatar: userData.avatar,
-            created_at: new Date().toISOString()
-          }
+            created_at: new Date().toISOString(),
+          },
         ])
         .select()
         .single();
@@ -27,7 +28,7 @@ class UserRepository {
   }
 
   // 사용자 프로필 조회
-  async getUserProfile(userId) {
+  async getUserProfile(userId: string): Promise<UserProfile | null> {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -44,7 +45,7 @@ class UserRepository {
   }
 
   // 사용자 프로필 업데이트
-  async updateUserProfile(userId, updateData) {
+  async updateUserProfile(userId: string, updateData: Partial<UserProfile>): Promise<UserProfile> {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -62,7 +63,7 @@ class UserRepository {
   }
 
   // 이메일로 사용자 조회
-  async getUserByEmail(email) {
+  async getUserByEmail(email: string): Promise<UserProfile | null> {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -79,4 +80,4 @@ class UserRepository {
   }
 }
 
-module.exports = new UserRepository();
+export default new UserRepository();

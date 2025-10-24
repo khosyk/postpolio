@@ -1,23 +1,25 @@
-const express = require('express');
-const authService = require('../services/authService');
+import express, { Request, Response } from 'express';
+import authService from '../services/authService';
+import { SignUpRequest, SignInRequest } from '../types';
 const router = express.Router();
 
 // 이메일 회원가입
-router.post('/signup', async (req, res) => {
+router.post('/signup', async (req: Request<{}, {}, SignUpRequest>, res: Response) => {
   try {
     const { email, password, displayName, avatar } = req.body;
 
     // 입력 검증
     if (!email || !password) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
-        message: '이메일과 비밀번호는 필수입니다.'
+        message: '이메일과 비밀번호는 필수입니다.',
       });
+      return;
     }
 
     const result = await authService.signUpWithEmail(email, password, {
       displayName,
-      avatar
+      avatar,
     });
 
     res.status(201).json({
@@ -26,14 +28,14 @@ router.post('/signup', async (req, res) => {
       data: {
         user: {
           id: result.user.id,
-          email: result.user.email
+          email: result.user.email,
         },
-        profile: result.profile
-      }
+        profile: result.profile,
+      },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Signup route error:', error);
-    
+
     let message = '회원가입 중 오류가 발생했습니다.';
     let statusCode = 500;
 
@@ -50,21 +52,22 @@ router.post('/signup', async (req, res) => {
 
     res.status(statusCode).json({
       success: false,
-      message
+      message,
     });
   }
 });
 
 // 이메일 로그인
-router.post('/signin', async (req, res) => {
+router.post('/signin', async (req: Request<{}, {}, SignInRequest>, res: Response) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
-        message: '이메일과 비밀번호는 필수입니다.'
+        message: '이메일과 비밀번호는 필수입니다.',
       });
+      return;
     }
 
     const result = await authService.signInWithEmail(email, password);
@@ -75,15 +78,15 @@ router.post('/signin', async (req, res) => {
       data: {
         user: {
           id: result.user.id,
-          email: result.user.email
+          email: result.user.email,
         },
         profile: result.profile,
-        accessToken: result.session.access_token
-      }
+        accessToken: result.accessToken,
+      },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Signin route error:', error);
-    
+
     let message = '로그인 중 오류가 발생했습니다.';
     let statusCode = 500;
 
@@ -94,21 +97,22 @@ router.post('/signin', async (req, res) => {
 
     res.status(statusCode).json({
       success: false,
-      message
+      message,
     });
   }
 });
 
 // 토큰 검증
-router.post('/verify', async (req, res) => {
+router.post('/verify', async (req: Request, res: Response) => {
   try {
     const { token } = req.body;
 
     if (!token) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
-        message: '토큰이 필요합니다.'
+        message: '토큰이 필요합니다.',
       });
+      return;
     }
 
     const user = await authService.verifyToken(token);
@@ -118,33 +122,34 @@ router.post('/verify', async (req, res) => {
       data: {
         user: {
           id: user.id,
-          email: user.email
-        }
-      }
+          email: user.email,
+        },
+      },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Token verification error:', error);
-    
+
     res.status(401).json({
       success: false,
-      message: '유효하지 않은 토큰입니다.'
+      message: '유효하지 않은 토큰입니다.',
     });
   }
 });
 
 // 프로필 업데이트
-router.put('/profile', async (req, res) => {
+router.put('/profile', async (req: Request, res: Response) => {
   try {
     const { userId, displayName, avatar } = req.body;
 
     if (!userId) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
-        message: '사용자 ID가 필요합니다.'
+        message: '사용자 ID가 필요합니다.',
       });
+      return;
     }
 
-    const updateData = {};
+    const updateData: any = {};
     if (displayName) updateData.display_name = displayName;
     if (avatar) updateData.avatar = avatar;
 
@@ -153,16 +158,16 @@ router.put('/profile', async (req, res) => {
     res.json({
       success: true,
       message: '프로필이 업데이트되었습니다.',
-      data: { profile }
+      data: { profile },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Profile update error:', error);
-    
+
     res.status(500).json({
       success: false,
-      message: '프로필 업데이트 중 오류가 발생했습니다.'
+      message: '프로필 업데이트 중 오류가 발생했습니다.',
     });
   }
 });
 
-module.exports = router;
+export default router;

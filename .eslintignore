@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.expo/
+coverage/
+*.config.js
+*.config.mjs
+scripts/
+server/dist/
+server/node_modules/

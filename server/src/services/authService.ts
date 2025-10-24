@@ -1,9 +1,14 @@
-const supabase = require('./supabaseClient');
-const userRepository = require('../repositories/userRepository');
+import supabase from './supabaseClient';
+import userRepository from '../repositories/userRepository';
+import { SignUpRequest, AuthResponse, UserProfile } from '../types';
 
 class AuthService {
   // 이메일 회원가입
-  async signUpWithEmail(email, password, userData = {}) {
+  async signUpWithEmail(
+    email: string,
+    password: string,
+    userData: Partial<SignUpRequest> = {}
+  ): Promise<AuthResponse> {
     try {
       // 1. Supabase Auth로 계정 생성
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -12,9 +17,9 @@ class AuthService {
         options: {
           data: {
             display_name: userData.displayName || email.split('@')[0],
-            avatar: userData.avatar || '👤'
-          }
-        }
+            avatar: userData.avatar || '👤',
+          },
+        },
       });
 
       if (authError) throw authError;
@@ -24,18 +29,18 @@ class AuthService {
         const profileData = {
           email,
           displayName: userData.displayName || email.split('@')[0],
-          avatar: userData.avatar || '👤'
+          avatar: userData.avatar || '👤',
         };
 
-        const profile = await userRepository.createUserProfile(
-          authData.user.id, 
-          profileData
-        );
+        const profile = await userRepository.createUserProfile(authData.user.id, profileData);
 
         return {
-          user: authData.user,
+          user: {
+            id: authData.user.id,
+            email: authData.user.email,
+          },
           profile,
-          session: authData.session
+          accessToken: authData.session?.access_token,
         };
       }
 
@@ -47,22 +52,26 @@ class AuthService {
   }
 
   // 이메일 로그인
-  async signInWithEmail(email, password) {
+  async signInWithEmail(email: string, password: string): Promise<AuthResponse> {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        password
+        password,
       });
 
       if (error) throw error;
 
       // 사용자 프로필 조회
       const profile = await userRepository.getUserProfile(data.user.id);
+      if (!profile) throw new Error('User profile not found');
 
       return {
-        user: data.user,
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+        },
         profile,
-        session: data.session
+        accessToken: data.session?.access_token,
       };
     } catch (error) {
       console.error('Sign in error:', error);
@@ -71,10 +80,10 @@ class AuthService {
   }
 
   // JWT 토큰 검증
-  async verifyToken(token) {
+  async verifyToken(token: string): Promise<any> {
     try {
       const { data, error } = await supabase.auth.getUser(token);
-      
+
       if (error) throw error;
       return data.user;
     } catch (error) {
@@ -96,7 +105,7 @@ class AuthService {
   }
 
   // 사용자 프로필 업데이트
-  async updateProfile(userId, updateData) {
+  async updateProfile(userId: string, updateData: Partial<UserProfile>): Promise<UserProfile> {
     try {
       return await userRepository.updateUserProfile(userId, updateData);
     } catch (error) {
@@ -106,4 +115,4 @@ class AuthService {
   }
 }
 
-module.exports = new AuthService();
+export default new AuthService();

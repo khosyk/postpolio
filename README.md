@@ -1,50 +1,120 @@
-# Welcome to your Expo app 👋
+# PostPolio - WebSocket Chat App 💬
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+React Native + Node.js 기반의 실시간 채팅 애플리케이션입니다.
 
-## Get started
+## 🚀 기술 스택
 
-1. Install dependencies
+### 클라이언트 (React Native)
 
-   ```bash
-   npm install
-   ```
+- **Expo** - React Native 개발 플랫폼
+- **TypeScript** - 타입 안전성
+- **Socket.IO** - 실시간 통신
+- **Supabase** - 인증 및 데이터베이스
+- **AsyncStorage** - 로컬 저장소
 
-2. Start the app
+### 서버 (Node.js)
 
-   ```bash
-   npx expo start
-   ```
+- **Express.js** - 웹 서버
+- **Socket.IO** - WebSocket 통신
+- **TypeScript** - 타입 안전성
+- **Supabase** - 인증 및 데이터베이스
+- **JWT** - 토큰 기반 인증
 
-In the output, you'll find options to open the app in a
+## 📁 프로젝트 구조
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+postpolio/
+├── app/                    # React Native 앱
+│   ├── (auth)/            # 인증 화면
+│   ├── (tabs)/            # 메인 탭 화면
+│   └── contexts/          # React Context
+├── server/                # Node.js 서버
+│   ├── src/               # 서버 소스코드
+│   │   ├── routes/        # API 라우트
+│   │   ├── services/      # 비즈니스 로직
+│   │   ├── repositories/  # 데이터 접근
+│   │   ├── socket/        # WebSocket 핸들러
+│   │   └── middleware/    # 미들웨어
+│   └── dist/              # 빌드 결과물
+└── package.json           # 루트 의존성
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## 🛠️ 설치 및 실행
 
-## Learn more
+### 1. 의존성 설치
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+# 루트 의존성 설치
+npm install
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+# 서버 의존성 설치
+cd server && npm install
+```
 
-## Join the community
+### 2. 환경 변수 설정
 
-Join our community of developers creating universal apps.
+```bash
+# server/.env 파일 생성
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_KEY=your_service_key
+PORT=4000
+CORS_ORIGIN=*
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### 3. 개발 서버 실행
+
+```bash
+# 서버 실행 (터미널 1)
+cd server && npm run dev
+
+# 클라이언트 실행 (터미널 2)
+npm run web
+```
+
+## 🎯 주요 기능
+
+- ✅ **실시간 채팅** - Socket.IO 기반
+- ✅ **사용자 인증** - 이메일 회원가입/로그인
+- ✅ **채팅 기록** - 메시지 히스토리 관리
+- ✅ **사용자 식별** - 닉네임 및 아바타
+- ✅ **시스템 메시지** - 입장/퇴장 알림
+- ✅ **새 메시지 알림** - 스크롤 자동 이동
+
+## 🔧 개발 도구
+
+### 린트 설정
+
+- **ESLint** - Airbnb 베이스 설정
+- **TypeScript** - 타입 체크
+- **자동 수정** - `npm run lint:fix`
+
+### 실행 명령어
+
+```bash
+# 전체 린트
+npm run lint
+
+# 클라이언트 린트
+npm run lint:client
+
+# 서버 린트
+npm run lint:server
+
+# 자동 수정
+npm run lint:fix
+```
+
+## 📱 사용법
+
+1. **회원가입** - 이메일로 계정 생성
+2. **로그인** - 계정으로 로그인
+3. **채팅방 입장** - 자동으로 채팅방 참여
+4. **메시지 전송** - 실시간 채팅
+5. **로그아웃** - 계정 로그아웃
+
+## 🚧 향후 계획
+
+- [ ] 챗봇 연동
+- [ ] 다중 채팅방 지원
+- [ ] 파일 업로드
+- [ ] 푸시 알림
