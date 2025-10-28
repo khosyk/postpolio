@@ -15,7 +15,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "format:client": "prettier --write app",
-    "format:server": "prettier --write server/src"
+    "format:server": "prettier --write server/src",
+    "gf:start": "bash scripts/gitflow.sh start",
+    "gf:release": "bash scripts/gitflow.sh release",
+    "gf:finish": "bash scripts/gitflow.sh finish-release"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
