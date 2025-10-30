@@ -22,7 +22,8 @@ class AuthService {
         password,
         options: {
           data: {
-            display_name: userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
+            display_name:
+              userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
             avatar: userData.avatar || '👤',
           },
         },
@@ -96,14 +97,14 @@ class AuthService {
   }
 
   // JWT 토큰 검증
-  async verifyToken(token: string): Promise<any> {
+  async verifyToken(token: string): Promise<{ id: string; email: string | null }> {
     if (!token || typeof token !== 'string') throw new Error('token is required');
     try {
       const { data, error } = await supabase.auth.getUser(token);
 
       if (error) throw error;
       if (!data || !data.user || !data.user.id) throw new Error('Invalid token');
-      return data.user;
+      return { id: data.user.id, email: data.user.email ?? null };
     } catch (error) {
       console.error('Token verification error:', error);
       throw error;
