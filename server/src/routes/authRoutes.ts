@@ -1,21 +1,15 @@
 import express, { Request, Response } from 'express';
 import authService from '../services/authService';
-import { SignUpRequest, SignInRequest } from '../types';
+import { SignInRequest, UserProfile } from '../types';
+import { isZodError, getErrorMessage } from '../utils/error';
+import { SignInSchema, SignUpSchema } from '../../../shared/schemas/auth';
 const router = express.Router();
 
 // 이메일 회원가입
-router.post('/signup', async (req: Request<{}, {}, SignUpRequest>, res: Response) => {
+router.post('/signup', async (req: Request, res: Response) => {
   try {
-    const { email, password, displayName, avatar } = req.body;
-
-    // 입력 검증
-    if (!email || !password) {
-      res.status(400).json({
-        success: false,
-        message: '이메일과 비밀번호는 필수입니다.',
-      });
-      return;
-    }
+    const parsed = SignUpSchema.parse(req.body);
+    const { email, password, displayName, avatar } = parsed;
 
     const result = await authService.signUpWithEmail(email, password, {
       displayName,
@@ -33,26 +27,21 @@ router.post('/signup', async (req: Request<{}, {}, SignUpRequest>, res: Response
         profile: result.profile,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Signup route error:', error);
 
-    let message = '회원가입 중 오류가 발생했습니다.';
-    let statusCode = 500;
+    const msg = getErrorMessage(error);
+    const status = isZodError(error)
+      ? 400
+      : msg.includes('already registered')
+        ? 409
+        : msg.includes('Invalid email') || msg.includes('Password should be at least')
+          ? 400
+          : 500;
 
-    if (error.message.includes('already registered')) {
-      message = '이미 등록된 이메일입니다.';
-      statusCode = 409;
-    } else if (error.message.includes('Invalid email')) {
-      message = '유효하지 않은 이메일 형식입니다.';
-      statusCode = 400;
-    } else if (error.message.includes('Password should be at least')) {
-      message = '비밀번호는 최소 6자 이상이어야 합니다.';
-      statusCode = 400;
-    }
-
-    res.status(statusCode).json({
+    res.status(status).json({
       success: false,
-      message,
+      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
     });
   }
 });
@@ -60,15 +49,8 @@ router.post('/signup', async (req: Request<{}, {}, SignUpRequest>, res: Response
 // 이메일 로그인
 router.post('/signin', async (req: Request<{}, {}, SignInRequest>, res: Response) => {
   try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      res.status(400).json({
-        success: false,
-        message: '이메일과 비밀번호는 필수입니다.',
-      });
-      return;
-    }
+    const parsed = SignInSchema.parse(req.body);
+    const { email, password } = parsed;
 
     const result = await authService.signInWithEmail(email, password);
 
@@ -84,20 +66,13 @@ router.post('/signin', async (req: Request<{}, {}, SignInRequest>, res: Response
         accessToken: result.accessToken,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Signin route error:', error);
-
-    let message = '로그인 중 오류가 발생했습니다.';
-    let statusCode = 500;
-
-    if (error.message.includes('Invalid login credentials')) {
-      message = '이메일 또는 비밀번호가 올바르지 않습니다.';
-      statusCode = 401;
-    }
-
-    res.status(statusCode).json({
+    const msg = getErrorMessage(error);
+    const status = isZodError(error) ? 400 : msg.includes('Invalid login credentials') ? 401 : 500;
+    res.status(status).json({
       success: false,
-      message,
+      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
     });
   }
 });
@@ -126,7 +101,7 @@ router.post('/verify', async (req: Request, res: Response) => {
         },
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Token verification error:', error);
 
     res.status(401).json({
@@ -149,7 +124,7 @@ router.put('/profile', async (req: Request, res: Response) => {
       return;
     }
 
-    const updateData: any = {};
+    const updateData: Partial<UserProfile> = {};
     if (displayName) updateData.display_name = displayName;
     if (avatar) updateData.avatar = avatar;
 
@@ -160,7 +135,7 @@ router.put('/profile', async (req: Request, res: Response) => {
       message: '프로필이 업데이트되었습니다.',
       data: { profile },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Profile update error:', error);
 
     res.status(500).json({
