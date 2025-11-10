@@ -162,6 +162,7 @@ const SignUpScreen = () => {
               autoCapitalize='none'
               autoCorrect={false}
               errorText={emailError}
+              isSuccess={!emailError && email.length > 0 && z.string().email().safeParse(email).success}
             />
           </View>
 
@@ -175,6 +176,7 @@ const SignUpScreen = () => {
               secureToggle
               autoCapitalize='none'
               errorText={passwordError}
+              isSuccess={!passwordError && passwordLevel >= 3 && password.length > 0}
             />
             <View style={styles.strengthBars}>
               <View style={[styles.bar, passwordLevel >= 1 ? styles.barLevel1 : styles.barOff]} />
@@ -193,6 +195,7 @@ const SignUpScreen = () => {
               secureToggle
               autoCapitalize='none'
               errorText={confirmError}
+              isSuccess={!confirmError && confirmPassword === password && confirmPassword.length > 0}
             />
           </View>
 

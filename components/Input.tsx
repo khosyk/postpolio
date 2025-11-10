@@ -7,6 +7,7 @@ type Props = TextInputProps & {
   errorText?: string;
   helperText?: string;
   secureToggle?: boolean; // 비밀번호 눈아이콘 토글
+  isSuccess?: boolean; // 검증 성공 시 초록색 보더
 };
 
 export default function Input({
@@ -16,6 +17,7 @@ export default function Input({
   secureTextEntry,
   secureToggle = false,
   style,
+  isSuccess = false,
   ...rest
 }: Props) {
   const [isSecure, setIsSecure] = useState<boolean>(!!secureTextEntry);
@@ -23,7 +25,12 @@ export default function Input({
   return (
     <View style={styles.wrapper}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
-      <View style={[styles.inputRow, errorText ? styles.inputRowError : undefined]}>
+      <View
+        style={[
+          styles.inputRow,
+          errorText ? styles.inputRowError : isSuccess ? styles.inputRowSuccess : undefined,
+        ]}
+      >
         <TextInput
           style={[styles.input, style]}
           placeholderTextColor={Colors.light.tabIconDefault}
@@ -58,6 +65,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   inputRowError: { borderColor: '#DC2626' },
+  inputRowSuccess: { borderColor: '#10B981' },
   input: {
     flex: 1,
     paddingVertical: 12,
