@@ -13,10 +13,9 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { getAuthUrl } from '@/config/api';
 
-const SERVER_URL = 'http://localhost:4000';
-
-export default function LoginScreen() {
+const LoginScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,7 +29,7 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const response = await fetch(`${SERVER_URL}/api/auth/signin`, {
+      const response = await fetch(getAuthUrl('SIGNIN'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -49,8 +48,7 @@ export default function LoginScreen() {
       } else {
         Alert.alert('오류', data.message);
       }
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch {
       Alert.alert('오류', '로그인 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
@@ -134,7 +132,7 @@ export default function LoginScreen() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -241,3 +239,5 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 });
+
+export default LoginScreen;

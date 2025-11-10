@@ -14,8 +14,7 @@ import { router } from 'expo-router';
 import Input from '@/components/Input';
 import { SignUpSchema } from '@shared/schemas/auth';
 import { z } from 'zod';
-
-const SERVER_URL = 'http://localhost:4000';
+import { getAuthUrl } from '@/config/api';
 
 const SignUpScreen = () => {
   const [email, setEmail] = useState('');
@@ -112,7 +111,7 @@ const SignUpScreen = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`${SERVER_URL}/api/auth/signup`, {
+      const response = await fetch(getAuthUrl('SIGNUP'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -162,7 +161,9 @@ const SignUpScreen = () => {
               autoCapitalize='none'
               autoCorrect={false}
               errorText={emailError}
-              isSuccess={!emailError && email.length > 0 && z.string().email().safeParse(email).success}
+              isSuccess={
+                !emailError && email.length > 0 && z.string().email().safeParse(email).success
+              }
             />
           </View>
 
@@ -195,7 +196,9 @@ const SignUpScreen = () => {
               secureToggle
               autoCapitalize='none'
               errorText={confirmError}
-              isSuccess={!confirmError && confirmPassword === password && confirmPassword.length > 0}
+              isSuccess={
+                !confirmError && confirmPassword === password && confirmPassword.length > 0
+              }
             />
           </View>
 
