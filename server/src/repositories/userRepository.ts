@@ -11,7 +11,7 @@ class UserRepository {
           {
             user_id: userId,
             email: userData.email,
-            display_name: userData.display_name,
+            nickname: userData.nickname,
             avatar: userData.avatar,
             created_at: new Date().toISOString(),
           },

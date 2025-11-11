@@ -18,7 +18,7 @@ export interface User {
 export interface UserProfile {
   user_id: string;
   email: string;
-  display_name?: string;
+  nickname?: string;
   avatar?: string;
   created_at?: string;
   updated_at?: string;

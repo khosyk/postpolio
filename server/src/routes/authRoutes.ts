@@ -10,7 +10,6 @@ router.post('/signup', async (req: Request, res: Response) => {
   try {
     const parsed = SignUpSchema.parse(req.body);
     const { email, password, displayName, avatar } = parsed;
-
     const result = await authService.signUpWithEmail(email, password, {
       displayName,
       avatar,
@@ -125,7 +124,7 @@ router.put('/profile', async (req: Request, res: Response) => {
     }
 
     const updateData: Partial<UserProfile> = {};
-    if (displayName) updateData.display_name = displayName;
+    if (displayName) updateData.nickname = displayName;
     if (avatar) updateData.avatar = avatar;
 
     const profile = await authService.updateProfile(userId, updateData);

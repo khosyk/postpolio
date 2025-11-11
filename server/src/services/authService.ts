@@ -17,13 +17,18 @@ class AuthService {
 
     try {
       // 1. Supabase Auth로 계정 생성
+      // emailRedirectTo: 이메일 인증 링크 클릭 시 리다이렉트될 URL
+      // React Native 앱의 경우 딥링크 또는 웹 페이지로 설정
+      const emailRedirectTo =
+        process.env['EMAIL_REDIRECT_URL'] || process.env['SUPABASE_REDIRECT_URL'] || undefined;
+
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo,
           data: {
-            display_name:
-              userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
+            nickname: userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
             avatar: userData.avatar || '👤',
           },
         },
@@ -38,7 +43,7 @@ class AuthService {
       if (authData.user) {
         const profileData = {
           email,
-          displayName: userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
+          nickname: userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
           avatar: userData.avatar || '👤',
         };
 
