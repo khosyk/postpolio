@@ -5,6 +5,32 @@
 - **개발 환경**: `http://localhost:4000`
 - **프로덕션 환경**: `https://api.postpolio.com` (환경 변수 `EXPO_PUBLIC_API_URL`로 설정)
 
+## Supabase 설정
+
+### 환경 변수 (서버)
+
+`server/.env` 파일에 다음 변수들을 설정하세요:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-service-role-key
+EMAIL_REDIRECT_URL=postpolio://auth/confirm  # React Native 딥링크 또는 웹 URL
+PORT=4000
+CORS_ORIGIN=*
+```
+
+### Supabase Dashboard 설정
+
+1. **Authentication → URL Configuration**
+   - Redirect URLs에 다음 추가:
+     - `postpolio://auth/confirm` (React Native 딥링크)
+     - `https://yourdomain.com/auth/confirm` (웹용, 선택사항)
+
+2. **Authentication → Providers → Email**
+   - Enable email provider: ON
+   - Confirm email: ON (보안 권장)
+   - Secure email change: ON (권장)
+
 ## 인증 API
 
 ### 회원가입
@@ -40,6 +66,11 @@
   }
 }
 ```
+
+**참고:**
+- 이메일 인증이 활성화된 경우, 사용자는 이메일로 전송된 인증 링크를 클릭해야 계정이 활성화됩니다.
+- 인증 링크는 `EMAIL_REDIRECT_URL` 환경 변수에 설정된 URL로 리다이렉트됩니다.
+- React Native 앱의 경우 딥링크(`postpolio://auth/confirm`)를 사용할 수 있습니다.
 
 **에러 응답:**
 - `400`: 요청 본문이 유효하지 않음 (Zod 검증 실패)

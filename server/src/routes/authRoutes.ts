@@ -10,6 +10,7 @@ router.post('/signup', async (req: Request, res: Response) => {
   try {
     const parsed = SignUpSchema.parse(req.body);
     const { email, password, displayName, avatar } = parsed;
+
     const result = await authService.signUpWithEmail(email, password, {
       displayName,
       avatar,

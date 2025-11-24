@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, processLock } from '@supabase/supabase-js';
 
 // .env 파일에서 환경 변수를 가져옵니다.
 const supabaseUrl = process.env['SUPABASE_URL'];
@@ -13,7 +13,9 @@ if (!supabaseUrl || !supabaseServiceKey) {
 // 불필요한 세션 지속성을 방지할 수 있습니다.
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
-    persistSession: false,
+    persistSession: true,
+    detectSessionInUrl: false,
+    lock: processLock,
   },
 });
 

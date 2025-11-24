@@ -33,7 +33,6 @@ class AuthService {
           },
         },
       });
-
       if (authError) throw authError;
       if (!authData || !authData.user) throw new Error('User creation failed (no user)');
       const userId = authData.user.id;
