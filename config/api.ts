@@ -19,6 +19,7 @@ export const API_CONFIG = {
       SIGNIN: '/api/auth/signin',
       VERIFY: '/api/auth/verify',
       PROFILE: '/api/auth/profile',
+      LOGOUT: '/api/auth/logout',
     },
   },
 } as const;

@@ -111,6 +111,25 @@ router.post('/verify', async (req: Request, res: Response) => {
   }
 });
 
+// 로그아웃
+router.post('/logout', async (_req: Request, res: Response) => {
+  try {
+    await authService.signOut();
+
+    res.json({
+      success: true,
+      message: '로그아웃되었습니다.',
+    });
+  } catch (error: unknown) {
+    console.error('Logout error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: '로그아웃 중 오류가 발생했습니다.',
+    });
+  }
+});
+
 // 프로필 업데이트
 router.put('/profile', async (req: Request, res: Response) => {
   try {
