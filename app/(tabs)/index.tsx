@@ -19,7 +19,7 @@ export default function HomeScreen() {
   const handleLogout = async () => {
     setMenuVisible(false);
     await logout();
-    router.replace('/(auth)');
+    router.replace('/(auth)/login');
   };
 
   const handleEditNickname = () => {
