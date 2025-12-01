@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { getAuthUrl } from '@/config/api';
+
 interface User {
   id: string;
   email: string;
@@ -11,6 +13,18 @@ interface AuthContextType {
   loading: boolean;
   login: (user: User, token: string) => Promise<void>;
   logout: () => Promise<void>;
+}
+
+interface VerifyResponseUser {
+  id: string;
+  email: string | null;
+}
+
+interface VerifyResponse {
+  success: boolean;
+  data?: {
+    user: VerifyResponseUser;
+  };
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,11 +42,50 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const storedUser = await AsyncStorage.getItem('user');
       const storedToken = await AsyncStorage.getItem('accessToken');
 
-      if (storedUser && storedToken) {
-        setUser(JSON.parse(storedUser));
+      if (!storedUser || !storedToken) {
+        setUser(null);
+        return;
       }
+
+      const parsedUser: User = JSON.parse(storedUser) as User;
+
+      // 서버에 토큰 검증을 요청해서 만료 여부/유효성 확인
+      const response = await fetch(getAuthUrl('VERIFY'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token: storedToken }),
+      });
+
+      if (!response.ok) {
+        // 토큰이 만료되었거나 유효하지 않으면 로그인 상태 초기화
+        await AsyncStorage.removeItem('user');
+        await AsyncStorage.removeItem('accessToken');
+        setUser(null);
+        return;
+      }
+
+      const data = (await response.json()) as VerifyResponse;
+
+      if (!data.success || !data.data?.user?.id) {
+        await AsyncStorage.removeItem('user');
+        await AsyncStorage.removeItem('accessToken');
+        setUser(null);
+        return;
+      }
+
+      const verifiedUser = data.data.user;
+
+      setUser({
+        id: verifiedUser.id,
+        email: verifiedUser.email ?? parsedUser.email,
+      });
     } catch (error) {
       console.error('Error checking auth state:', error);
+      setUser(null);
+      await AsyncStorage.removeItem('user');
+      await AsyncStorage.removeItem('accessToken');
     } finally {
       setLoading(false);
     }
