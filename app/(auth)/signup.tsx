@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { router } from 'expo-router';
 import Input from '@/components/Input';
 import { SignUpSchema } from '@shared/schemas/auth';
 import { z } from 'zod';
 import { getAuthUrl } from '@/config/api';
+import BlockingLoader from '@/components/BlockingLoader';
 
 const SignUpScreen = () => {
   const [email, setEmail] = useState('');
@@ -140,99 +141,103 @@ const SignUpScreen = () => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>회원가입</Text>
-          <Text style={styles.subtitle}>새 계정을 만들어보세요</Text>
-        </View>
-
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Input
-              label='이메일'
-              value={email}
-              onChangeText={onEmailChange}
-              placeholder='이메일을 입력하세요'
-              keyboardType='email-address'
-              autoCapitalize='none'
-              autoCorrect={false}
-              errorText={emailError}
-              isSuccess={
-                !emailError && email.length > 0 && z.string().email().safeParse(email).success
-              }
-            />
+    <>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.header}>
+            <Text style={styles.title}>회원가입</Text>
+            <Text style={styles.subtitle}>새 계정을 만들어보세요</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Input
-              label='비밀번호'
-              value={password}
-              onChangeText={onPasswordChange}
-              placeholder='비밀번호를 입력하세요 (최소 6자)'
-              secureTextEntry
-              secureToggle
-              autoCapitalize='none'
-              errorText={passwordError}
-              isSuccess={!passwordError && passwordLevel >= 3 && password.length > 0}
-            />
-            <View style={styles.strengthBars}>
-              <View style={[styles.bar, passwordLevel >= 1 ? styles.barLevel1 : styles.barOff]} />
-              <View style={[styles.bar, passwordLevel >= 2 ? styles.barLevel2 : styles.barOff]} />
-              <View style={[styles.bar, passwordLevel >= 3 ? styles.barLevel3 : styles.barOff]} />
+          <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <Input
+                label='이메일'
+                value={email}
+                onChangeText={onEmailChange}
+                placeholder='이메일을 입력하세요'
+                keyboardType='email-address'
+                autoCapitalize='none'
+                autoCorrect={false}
+                errorText={emailError}
+                isSuccess={
+                  !emailError && email.length > 0 && z.string().email().safeParse(email).success
+                }
+              />
             </View>
+
+            <View style={styles.inputContainer}>
+              <Input
+                label='비밀번호'
+                value={password}
+                onChangeText={onPasswordChange}
+                placeholder='비밀번호를 입력하세요 (최소 6자)'
+                secureTextEntry
+                secureToggle
+                autoCapitalize='none'
+                errorText={passwordError}
+                isSuccess={!passwordError && passwordLevel >= 3 && password.length > 0}
+              />
+              <View style={styles.strengthBars}>
+                <View style={[styles.bar, passwordLevel >= 1 ? styles.barLevel1 : styles.barOff]} />
+                <View style={[styles.bar, passwordLevel >= 2 ? styles.barLevel2 : styles.barOff]} />
+                <View style={[styles.bar, passwordLevel >= 3 ? styles.barLevel3 : styles.barOff]} />
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Input
+                label='비밀번호 확인'
+                value={confirmPassword}
+                onChangeText={onConfirmChange}
+                placeholder='비밀번호를 다시 입력하세요'
+                secureTextEntry
+                secureToggle
+                autoCapitalize='none'
+                errorText={confirmError}
+                isSuccess={
+                  !confirmError && confirmPassword === password && confirmPassword.length > 0
+                }
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Input
+                label='닉네임 (선택사항)'
+                value={displayName}
+                onChangeText={onDisplayNameChange}
+                placeholder='닉네임을 입력하세요'
+                autoCapitalize='none'
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.signUpButton, loading && styles.disabledButton]}
+              onPress={handleSignUp}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color='#FFFFFF' />
+              ) : (
+                <Text style={styles.signUpButtonText}>회원가입</Text>
+              )}
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Input
-              label='비밀번호 확인'
-              value={confirmPassword}
-              onChangeText={onConfirmChange}
-              placeholder='비밀번호를 다시 입력하세요'
-              secureTextEntry
-              secureToggle
-              autoCapitalize='none'
-              errorText={confirmError}
-              isSuccess={
-                !confirmError && confirmPassword === password && confirmPassword.length > 0
-              }
-            />
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>이미 계정이 있으신가요?</Text>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Text style={styles.loginLink}>로그인</Text>
+            </TouchableOpacity>
           </View>
-
-          <View style={styles.inputContainer}>
-            <Input
-              label='닉네임 (선택사항)'
-              value={displayName}
-              onChangeText={onDisplayNameChange}
-              placeholder='닉네임을 입력하세요'
-              autoCapitalize='none'
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.signUpButton, loading && styles.disabledButton]}
-            onPress={handleSignUp}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color='#FFFFFF' />
-            ) : (
-              <Text style={styles.signUpButtonText}>회원가입</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>이미 계정이 있으신가요?</Text>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.loginLink}>로그인</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+      {/* API 요청 동안 전체 화면을 막는 로딩 오버레이 (boolean으로 제어) */}
+      <BlockingLoader visible={loading} message='회원가입 중입니다...' />
+    </>
   );
 };
 
