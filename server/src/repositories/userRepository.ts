@@ -78,6 +78,18 @@ class UserRepository {
       throw error;
     }
   }
+
+  // 사용자 프로필 삭제
+  async deleteUserProfile(userId: string): Promise<void> {
+    try {
+      const { error } = await supabase.from('user_profiles').delete().eq('user_id', userId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting user profile:', error);
+      throw error;
+    }
+  }
 }
 
 export default new UserRepository();

@@ -136,6 +136,22 @@ class AuthService {
       throw error;
     }
   }
+
+  // 회원탈퇴
+  async withdraw(userId: string): Promise<void> {
+    if (!userId || typeof userId !== 'string') throw new Error('userId is required');
+    try {
+      // 1. 프로필 삭제
+      await userRepository.deleteUserProfile(userId);
+
+      // 2. Supabase Auth 사용자 삭제 (서비스 롤 키 사용)
+      const { error } = await supabase.auth.admin.deleteUser(userId);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Withdraw error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new AuthService();

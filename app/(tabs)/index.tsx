@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View, Pressable } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { getAuthUrl } from '@/config/api';
 
 export default function HomeScreen() {
   const { user, logout } = useAuth();
@@ -33,8 +43,51 @@ export default function HomeScreen() {
   };
 
   const handleWithdraw = () => {
-    // TODO: 회원탈퇴 API 연동
-    setMenuVisible(false);
+    Alert.alert(
+      '회원탈퇴',
+      '정말 회원탈퇴 하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '회원탈퇴',
+          style: 'destructive',
+          onPress: async () => {
+            setMenuVisible(false);
+            try {
+              const token = await AsyncStorage.getItem('accessToken');
+
+              if (!token) {
+                await logout();
+                router.replace('/(auth)/login');
+                return;
+              }
+
+              const response = await fetch(getAuthUrl('WITHDRAW'), {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`,
+                },
+              });
+
+              const data = await response.json().catch(() => undefined);
+
+              if (!response.ok || !data?.success) {
+                Alert.alert('오류', data?.message ?? '회원탈퇴 중 오류가 발생했습니다.');
+                return;
+              }
+
+              Alert.alert('완료', '회원탈퇴가 완료되었습니다.');
+              await logout();
+              router.replace('/(auth)/login');
+            } catch {
+              Alert.alert('오류', '회원탈퇴 중 오류가 발생했습니다.');
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   return (

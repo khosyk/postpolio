@@ -164,4 +164,36 @@ router.put('/profile', async (req: Request, res: Response) => {
   }
 });
 
+// 회원탈퇴
+router.delete('/withdraw', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+
+    if (!token) {
+      res.status(401).json({
+        success: false,
+        message: '인증 토큰이 필요합니다.',
+      });
+      return;
+    }
+
+    const user = await authService.verifyToken(token);
+
+    await authService.withdraw(user.id);
+
+    res.json({
+      success: true,
+      message: '회원탈퇴가 완료되었습니다.',
+    });
+  } catch (error: unknown) {
+    console.error('Withdraw error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: '회원탈퇴 중 오류가 발생했습니다.',
+    });
+  }
+});
+
 export default router;
