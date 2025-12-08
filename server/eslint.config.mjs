@@ -15,7 +15,7 @@ export default [
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
-        project: './tsconfig.json',
+        project: '../tsconfig.json',
       },
     },
     plugins: {
@@ -26,7 +26,7 @@ export default [
     rules: {
       // TypeScript rules
       '@typescript-eslint/no-unused-vars': 'error',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-empty-function': 'warn',
@@ -55,7 +55,16 @@ export default [
       'prefer-template': 'error',
       'template-curly-spacing': 'error',
       'arrow-spacing': 'error',
-      'comma-dangle': ['error', 'always-multiline'],
+      'comma-dangle': [
+        'error',
+        {
+          arrays: 'always-multiline',
+          objects: 'always-multiline',
+          imports: 'always-multiline',
+          exports: 'always-multiline',
+          functions: 'never',
+        },
+      ],
       'quotes': ['error', 'single', { avoidEscape: true }],
       'semi': ['error', 'always'],
       'indent': ['error', 2, { SwitchCase: 1 }],

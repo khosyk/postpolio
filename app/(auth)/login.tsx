@@ -1,22 +1,22 @@
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { getAuthUrl } from '@/config/api';
+import BlockingLoader from '@/components/BlockingLoader';
 
-const SERVER_URL = 'http://localhost:4000';
-
-export default function LoginScreen() {
+const LoginScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const response = await fetch(`${SERVER_URL}/api/auth/signin`, {
+      const response = await fetch(getAuthUrl('SIGNIN'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -49,8 +49,7 @@ export default function LoginScreen() {
       } else {
         Alert.alert('오류', data.message);
       }
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch {
       Alert.alert('오류', '로그인 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
@@ -66,75 +65,79 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>환영합니다</Text>
-          <Text style={styles.subtitle}>로그인하여 채팅을 시작하세요</Text>
-        </View>
-
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>이메일</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder='이메일을 입력하세요'
-              keyboardType='email-address'
-              autoCapitalize='none'
-              autoCorrect={false}
-            />
+    <>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.header}>
+            <Text style={styles.title}>환영합니다</Text>
+            <Text style={styles.subtitle}>로그인하여 채팅을 시작하세요</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>비밀번호</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder='비밀번호를 입력하세요'
-              secureTextEntry
-              autoCapitalize='none'
-            />
+          <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>이메일</Text>
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder='이메일을 입력하세요'
+                keyboardType='email-address'
+                autoCapitalize='none'
+                autoCorrect={false}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>비밀번호</Text>
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder='비밀번호를 입력하세요'
+                secureTextEntry
+                autoCapitalize='none'
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.emailButton, loading && styles.disabledButton]}
+              onPress={handleEmailLogin}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color='#FFFFFF' />
+              ) : (
+                <Text style={styles.emailButtonText}>이메일로 로그인</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>또는</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
+              <Text style={styles.googleButtonText}>구글로 로그인</Text>
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={[styles.emailButton, loading && styles.disabledButton]}
-            onPress={handleEmailLogin}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color='#FFFFFF' />
-            ) : (
-              <Text style={styles.emailButtonText}>이메일로 로그인</Text>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>또는</Text>
-            <View style={styles.dividerLine} />
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>계정이 없으신가요?</Text>
+            <TouchableOpacity onPress={handleSignUp}>
+              <Text style={styles.signUpLink}>회원가입</Text>
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
-            <Text style={styles.googleButtonText}>구글로 로그인</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>계정이 없으신가요?</Text>
-          <TouchableOpacity onPress={handleSignUp}>
-            <Text style={styles.signUpLink}>회원가입</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+      {/* API 요청 동안 전체 화면을 막는 로딩 오버레이 (boolean으로 제어) */}
+      <BlockingLoader visible={loading} message='로그인 중입니다...' />
+    </>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -241,3 +244,5 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 });
+
+export default LoginScreen;

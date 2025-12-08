@@ -1,20 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  LayoutChangeEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
   StyleSheet,
   Text,
-  View,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
-  LayoutChangeEvent,
-  Alert,
+  View,
 } from 'react-native';
 import io from 'socket.io-client';
+import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
 const SERVER_URL = Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
@@ -202,6 +203,7 @@ export default function ChatScreen() {
         style: 'destructive',
         onPress: async () => {
           await logout();
+          router.replace('/(auth)/login');
         },
       },
     ]);
