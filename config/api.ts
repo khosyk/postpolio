@@ -26,6 +26,15 @@ export const API_CONFIG = {
       LOGOUT: '/api/auth/logout',
       WITHDRAW: '/api/auth/withdraw',
     },
+    // 그룹 관련
+    GROUPS: {
+      LIST: '/api/groups',
+      CREATE: '/api/groups',
+      DETAIL: (id: string) => `/api/groups/${id}`,
+      INVITE: (id: string) => `/api/groups/${id}/invite`,
+      LEAVE: (id: string) => `/api/groups/${id}/leave`,
+      DELETE: (id: string) => `/api/groups/${id}`,
+    },
   },
 } as const;
 
@@ -41,4 +50,16 @@ export const getApiUrl = (endpoint: string): string => {
  */
 export const getAuthUrl = (key: keyof typeof API_CONFIG.ENDPOINTS.AUTH): string => {
   return getApiUrl(API_CONFIG.ENDPOINTS.AUTH[key]);
+};
+
+/**
+ * 그룹 API URL 헬퍼
+ */
+export const getGroupUrl = (key: keyof typeof API_CONFIG.ENDPOINTS.GROUPS, id?: string): string => {
+  const endpoint = API_CONFIG.ENDPOINTS.GROUPS[key];
+  if (typeof endpoint === 'function') {
+    if (!id) throw new Error(`Group ID is required for ${key}`);
+    return getApiUrl(endpoint(id));
+  }
+  return getApiUrl(endpoint);
 };

@@ -4,6 +4,7 @@ import http from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes';
+import groupRoutes from './routes/groupRoutes';
 import { setupSocketHandlers } from './socket/socketHandler';
 
 const app = express();
@@ -17,6 +18,7 @@ app.use(express.json());
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/groups', groupRoutes);
 
 app.get('/', (_req, res) => {
   res.send('WebSocket server is running');
