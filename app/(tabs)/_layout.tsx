@@ -32,15 +32,15 @@ export default function TabLayout() {
           name='index'
           options={{
             title: 'Home',
-            tabBarIcon: ({ color }) => <IconSymbol size={28} name='house.fill' color={color} />,
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name='home' color={color} />,
           }}
         />
         <Tabs.Screen
           name='explore'
           options={{
-            title: 'Explore',
+            title: 'Groups',
             tabBarIcon: ({ color }) => (
-              <IconSymbol size={28} name='paperplane.fill' color={color} />
+              <IconSymbol size={28} name='send' color={color} />
             ),
           }}
         />
@@ -49,7 +49,7 @@ export default function TabLayout() {
           options={{
             title: 'Chat',
             tabBarIcon: ({ color }) => (
-              <IconSymbol size={28} name='bubble.left.and.bubble.right.fill' color={color} />
+              <IconSymbol size={28} name='chat' color={color} />
             ),
           }}
         />

@@ -1,23 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
-  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { getAuthUrl, getGroupUrl } from '@/config/api';
 import BlockingLoader from '@/components/BlockingLoader';
 import { StudyGroup } from '@/types/group';
+import { IconSymbol } from '@/components/ui/IconSymbol';
+
+const FAVORITES_STORAGE_KEY = 'group_favorites';
 
 const HomeScreen = () => {
   const { user, logout } = useAuth();
@@ -25,13 +27,36 @@ const HomeScreen = () => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [groups, setGroups] = useState<StudyGroup[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
   const nickname =
     // TODO: 서버 프로필 닉네임 연동 시 user.nickname으로 교체
     (user?.email && user.email.split('@')[0]) || '게스트';
 
   const avatar = nickname.charAt(0).toUpperCase();
+
+  // 즐겨찾기 로드
+  const loadFavorites = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(FAVORITES_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as string[];
+        setFavorites(new Set(parsed));
+      }
+    } catch {
+      // 즐겨찾기 로드 실패 시 무시
+    }
+  };
+
+  // 즐겨찾기 저장
+  const saveFavorites = async (newFavorites: Set<string>) => {
+    try {
+      await AsyncStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(newFavorites)));
+      setFavorites(newFavorites);
+    } catch {
+      // 즐겨찾기 저장 실패 시 무시
+    }
+  };
 
   // 그룹 목록 조회
   const fetchGroups = async () => {
@@ -56,17 +81,50 @@ const HomeScreen = () => {
     }
   };
 
+  // 초기 로드
   useEffect(() => {
     if (user) {
+      loadFavorites();
       fetchGroups();
     }
   }, [user]);
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchGroups();
-    setRefreshing(false);
+  // 화면 포커스 시 데이터 갱신 (그룹 생성/삭제/나가기 후 돌아올 때)
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        fetchGroups();
+      }
+    }, [user])
+  );
+
+  // 즐겨찾기 토글
+  const handleToggleFavorite = async (groupId: string) => {
+    const newFavorites = new Set(favorites);
+    if (newFavorites.has(groupId)) {
+      newFavorites.delete(groupId);
+    } else {
+      newFavorites.add(groupId);
+    }
+    await saveFavorites(newFavorites);
   };
+
+  // 정렬된 그룹 목록 (즐겨찾기 우선, 그 다음 오래된 순서, 최대 5개)
+  const displayedGroups = useMemo(() => {
+    const sorted = [...groups].sort((a, b) => {
+      const aIsFavorite = favorites.has(a.id);
+      const bIsFavorite = favorites.has(b.id);
+
+      // 즐겨찾기 우선
+      if (aIsFavorite && !bIsFavorite) return -1;
+      if (!aIsFavorite && bIsFavorite) return 1;
+
+      // 같은 즐겨찾기 상태면 오래된 순서
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+
+    return sorted.slice(0, 5);
+  }, [groups, favorites]);
 
   const handleCreateGroup = () => {
     router.push('/(tabs)/groups/create');
@@ -169,32 +227,58 @@ const HomeScreen = () => {
             <Text style={styles.emptySubText}>그룹을 만들어 스터디를 시작해보세요!</Text>
           </View>
         ) : (
-          <FlatList
-            data={groups}
-            keyExtractor={item => item.id}
-            renderItem={({ item }) => (
+          <View style={styles.groupsContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.groupsScrollContent}
+            >
+              {displayedGroups.map(item => {
+                const isFavorite = favorites.has(item.id);
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.groupChip}
+                    onPress={() => handleGroupPress(item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Pressable
+                      style={styles.favoriteButton}
+                      onPress={() => handleToggleFavorite(item.id)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <IconSymbol
+                        name={isFavorite ? 'star' : 'star-border'}
+                        size={14}
+                        color={isFavorite ? '#FFD700' : '#fff'}
+                      />
+                    </Pressable>
+                    <View style={styles.chipContent}>
+                      <Text style={styles.chipName} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      {item.description ? (
+                        <Text style={styles.chipDescription} numberOfLines={2}>
+                          {item.description}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              {/* 더 보기 칩 */}
               <TouchableOpacity
-                style={styles.groupCard}
-                onPress={() => handleGroupPress(item.id)}
+                style={styles.moreChip}
+                onPress={() => router.push('/(tabs)/explore')}
                 activeOpacity={0.7}
               >
-                <View style={styles.groupCardContent}>
-                  <Text style={styles.groupName}>{item.name}</Text>
-                  {item.description ? (
-                    <Text style={styles.groupDescription} numberOfLines={2}>
-                      {item.description}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.groupDate}>
-                    {new Date(item.created_at).toLocaleDateString('ko-KR')}
-                  </Text>
+                <View style={styles.moreChipContent}>
+                  <Text style={styles.moreChipText}>더 보기</Text>
+                  <Text style={styles.moreChipArrow}>›</Text>
                 </View>
-                <Text style={styles.groupArrow}>›</Text>
               </TouchableOpacity>
-            )}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-            contentContainerStyle={styles.listContent}
-          />
+            </ScrollView>
+          </View>
         )}
       </View>
 
@@ -297,44 +381,86 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  listContent: {
-    paddingBottom: 16,
-  },
-  groupCard: {
-    flexDirection: 'row',
+  groupsContainer: {},
+  groupsScrollContent: {
+    padding: 10,
     alignItems: 'center',
+  },
+  groupChip: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOffset: { width: 1, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+    elevation: 1,
+    position: 'relative',
+  },
+  moreChip: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#F3F4F6',
+    marginRight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+  },
+  moreChipContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginBottom: 2,
+  },
+  moreChipArrow: {
+    fontSize: 18,
+    color: '#9CA3AF',
+  },
+  favoriteButton: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    zIndex: 1,
+    borderRadius: 10,
+    padding: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 1, height: 1 },
+    shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+    borderWidth: 0.5,
+    borderColor: '#E5E7EB',
   },
-  groupCardContent: {
+  chipContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
     flex: 1,
+    width: '100%',
   },
-  groupName: {
-    fontSize: 16,
+  chipName: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#111827',
-    marginBottom: 4,
+    marginBottom: 2,
+    textAlign: 'center',
   },
-  groupDescription: {
-    fontSize: 14,
+  chipDescription: {
+    fontSize: 9,
     color: '#6B7280',
-    marginBottom: 8,
-  },
-  groupDate: {
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
-  groupArrow: {
-    fontSize: 24,
-    color: '#9CA3AF',
-    marginLeft: 12,
+    textAlign: 'center',
+    lineHeight: 11,
   },
   emptyContainer: {
     flex: 1,

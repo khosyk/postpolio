@@ -29,7 +29,7 @@ const io = new Server(server, {
     origin: CORS_ORIGIN,
     methods: ['GET', 'POST'],
   },
-});
+}); 
 
 // 인증 미들웨어 적용 (선택적)
 // io.use(require('./middleware/authMiddleware').socketAuthMiddleware);
