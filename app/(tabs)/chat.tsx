@@ -1,529 +1,205 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   FlatList,
-  Keyboard,
-  KeyboardAvoidingView,
-  LayoutChangeEvent,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  Platform,
+  RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
-import io from 'socket.io-client';
-import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { getGroupUrl } from '@/config/api';
+import { StudyGroup } from '@/types/group';
 import { useAuth } from '@/contexts/AuthContext';
+import { SkeletonGroupCard } from '@/components/Skeleton';
 
-const SERVER_URL = Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
-const DEFAULT_ROOM_ID = 'lobby';
+const ChatScreen = () => {
+  const { user } = useAuth();
+  const router = useRouter();
+  const [groups, setGroups] = useState<StudyGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-export default function ChatScreen() {
-  const tempUserId = useRef<string | null>(null);
-  const [roomId] = useState(DEFAULT_ROOM_ID);
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<
-    {
-      id: string;
-      text: string;
-      userId: string;
-      displayName?: string;
-      avatar?: string;
-      createdAt: string;
-      type?: string;
-    }[]
-  >([]);
-  const socketRef = useRef<any>(null);
-  const flatListRef = useRef<FlatList>(null);
-  const [hasNewMessages, setHasNewMessages] = useState(false);
-
-  // scroll/keyboard tracking
-  const listHeightRef = useRef(0);
-  const contentHeightRef = useRef(0);
-  const scrollOffsetRef = useRef(0);
-  const { user, logout } = useAuth();
-  const atBottomRef = useRef(true);
-  const wasAtBottomBeforeKbRef = useRef(true);
-  const BOTTOM_EPSILON = 24; // px threshold to consider as bottom
-
-  const socket = useMemo(() => {
-    const s = io(SERVER_URL, { transports: ['websocket'] });
-    socketRef.current = s;
-    return s;
-  }, []);
-
-  const computeAtBottom = () => {
-    const visible = listHeightRef.current;
-    const content = contentHeightRef.current;
-    const offset = scrollOffsetRef.current;
-    // if content smaller than visible, treat as bottom
-    if (content <= visible) return true;
-    return content - (offset + visible) <= BOTTOM_EPSILON;
-  };
-
-  const ensureScrollState = () => {
-    const isAtBottom = computeAtBottom();
-    atBottomRef.current = isAtBottom;
-  };
-
-  useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
-      wasAtBottomBeforeKbRef.current = atBottomRef.current;
-      // keyboard will resize view; let next layout/content pass update atBottom
-      // If user was already at bottom, keep auto-scroll behavior on next message
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      // after keyboard hides, recompute
-      requestAnimationFrame(() => ensureScrollState());
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    function onConnect() {
-      socket.emit('join', roomId);
-    }
-
-    function onJoined(payload: {
-      roomId: string;
-      userId: string;
-      displayName?: string;
-      avatar?: string;
-      history?: any[];
-    }) {
-      tempUserId.current = payload.userId;
-      if (Array.isArray(payload.history)) {
-        setMessages(payload.history as any);
-        // scroll to bottom after initial history render
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-          atBottomRef.current = true;
-          setHasNewMessages(false);
-        }, 0);
+  // 그룹 목록 조회
+  const fetchGroups = async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) {
+        setLoading(false);
+        return;
       }
-    }
 
-    function onMessage(payload: any) {
-      setMessages(prev => [...prev, payload]);
-    }
-
-    function onSystem(payload: any) {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `${Date.now()}-${payload.userId}`,
-          text: `${payload.displayName || payload.userId} ${
-            payload.kind === 'join' ? '입장' : '퇴장'
-          }`,
-          userId: 'system',
-          displayName: payload.displayName,
-          avatar: payload.avatar,
-          createdAt: new Date().toISOString(),
-          type: 'system',
+      const response = await fetch(getGroupUrl('LIST'), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
-      ]);
-    }
-
-    socket.on('connect', onConnect);
-    socket.on('joined', onJoined);
-    socket.on('message', onMessage);
-    socket.on('system', onSystem);
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('joined', onJoined);
-      socket.off('message', onMessage);
-      socket.off('system', onSystem);
-      socket.disconnect();
-    };
-  }, [socket, roomId]);
-
-  // react to new messages: auto-scroll only if user is at bottom
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const isAtBottom = computeAtBottom();
-    if (isAtBottom) {
-      // keep pinned to bottom
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
       });
-      setHasNewMessages(false);
-    } else {
-      setHasNewMessages(true);
-    }
-  }, [messages]);
 
-  const onListLayout = (e: LayoutChangeEvent) => {
-    listHeightRef.current = e.nativeEvent.layout.height;
-    ensureScrollState();
-  };
-
-  const onContentSizeChange = (_w: number, h: number) => {
-    contentHeightRef.current = h;
-    ensureScrollState();
-  };
-
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
-    const isAtBottom = computeAtBottom();
-    atBottomRef.current = isAtBottom;
-    if (isAtBottom && hasNewMessages) setHasNewMessages(false);
-  };
-
-  const send = () => {
-    const text = input.trim();
-    if (!text) return;
-    socket.emit('message', { roomId, text });
-    setInput('');
-  };
-
-  const clearHistory = () => {
-    socket.emit('clearHistory', { roomId });
-  };
-
-  const scrollToBottom = () => {
-    if (messages.length > 0) {
-      flatListRef.current?.scrollToEnd({ animated: true });
-      setHasNewMessages(false);
-      atBottomRef.current = true;
+      const data = await response.json().catch(() => undefined);
+      if (response.ok && data?.success) {
+        setGroups(data.data?.groups || []);
+      }
+    } catch {
+      // 그룹 목록 조회 실패 시 무시
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert('로그아웃', '정말 로그아웃하시겠습니까?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '로그아웃',
-        style: 'destructive',
-        onPress: async () => {
-          await logout();
-          router.replace('/(auth)/login');
-        },
-      },
-    ]);
-  };
-
-  const renderItem = ({ item }: any) => {
-    const isSystem = item.userId === 'system';
-    const type = item.type;
-    if (type === 'system') {
-      return (
-        <View style={[styles.message, styles.systemMsg]}>
-          <Text style={styles.systemText}>{item.text}</Text>
-        </View>
-      );
-    }
-    if (type === 'message' || !type) {
-      const isMe = item.userId === tempUserId.current;
-      return (
-        <View
-          style={[
-            styles.messageContainer,
-            isMe ? styles.myMessageContainer : styles.yourMessageContainer,
-          ]}
-        >
-          {!isMe && (
-            <View style={styles.userInfo}>
-              <Text style={styles.avatar}>{item.avatar || '👤'}</Text>
-              <Text style={styles.displayName}>{item.displayName || item.userId}</Text>
-            </View>
-          )}
-          <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.yourBubble]}>
-            <Text style={[styles.messageText, isMe ? styles.myText : styles.yourText]}>
-              {item.text}
-            </Text>
-            <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.yourTimestamp]}>
-              {new Date(item.createdAt).toLocaleTimeString('ko-KR', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </Text>
-          </View>
-        </View>
-      );
-    }
-    return (
-      <View style={[styles.message, styles.systemMsg]}>
-        <Text style={styles.messageText}>{item.text}</Text>
-      </View>
-    );
-  };
-
+  // 초기 로드
   useEffect(() => {
-    const onCleared = (_payload: any) => {
-      setMessages([]);
-      setHasNewMessages(false);
-      atBottomRef.current = true;
-    };
-    socket.on('historyCleared', onCleared);
-    return () => {
-      socket.off('historyCleared', onCleared);
-    };
-  }, [socket]);
+    if (user) {
+      setLoading(true);
+      fetchGroups();
+    } else {
+      setLoading(false);
+    }
+  }, [user]);
+
+  // 화면 포커스 시 데이터 갱신
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        fetchGroups();
+      }
+    }, [user])
+  );
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchGroups();
+    setRefreshing(false);
+  };
+
+  const handleGroupChatPress = (groupId: string, groupName: string) => {
+    // TODO: 그룹별 채팅방으로 이동하는 로직 구현
+    // 예: router.push(`/chat/${groupId}`)
+    router.push({
+      pathname: '/chat/[groupId]',
+      params: { groupId, groupName },
+    });
+  };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerText}>Room: {roomId}</Text>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity onPress={clearHistory} style={styles.clearBtn}>
-            <Text style={styles.clearText}>기록 삭제</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-            <Text style={styles.logoutText}>로그아웃</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.headerTitle}>그룹별 채팅방</Text>
       </View>
-      <FlatList
-        ref={flatListRef}
-        style={styles.list}
-        data={messages}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{ padding: 16 }}
-        onScroll={onScroll}
-        onLayout={onListLayout}
-        onContentSizeChange={onContentSizeChange}
-        scrollEventThrottle={16}
-      />
-      {hasNewMessages && (
-        <View style={styles.newMessageBar}>
-          <TouchableOpacity style={styles.newMessageBtn} onPress={scrollToBottom}>
-            <Text style={styles.newMessageText}>새 메시지 보기</Text>
-          </TouchableOpacity>
+
+      {loading ? (
+        <View style={styles.listContent}>
+          {[1, 2, 3].map(i => (
+            <SkeletonGroupCard key={i} />
+          ))}
         </View>
-      )}
-      <View style={styles.inputBar}>
-        <TextInput
-          style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          placeholder='메시지를 입력하세요'
-          onSubmitEditing={send}
-          returnKeyType='send'
+      ) : groups.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>참여 중인 그룹이 없습니다.</Text>
+          <Text style={styles.emptySubText}>그룹에 참여하여 채팅을 시작하세요.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={groups}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.groupCard}
+              onPress={() => handleGroupChatPress(item.id, item.name)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.groupCardContent}>
+                <View style={styles.groupInfo}>
+                  <Text style={styles.groupName}>{item.name}</Text>
+                  {item.description ? (
+                    <Text style={styles.groupDescription} numberOfLines={1}>
+                      {item.description}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.chatArrow}>›</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          contentContainerStyle={styles.listContent}
         />
-        <TouchableOpacity style={styles.sendBtn} onPress={send}>
-          <Text style={styles.sendText}>전송</Text>
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+      )}
+    </SafeAreaView>
   );
-}
+};
+
+export default ChatScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB', // Background (클린/모던)
+    backgroundColor: '#F9FAFB',
   },
   header: {
-    paddingTop: 56,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 16,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#2C3E50', // Primary (신뢰/전문성)
-    borderBottomWidth: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  headerButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  headerText: {
-    fontSize: 18,
+  headerTitle: {
+    fontSize: 24,
     fontWeight: '700',
-    color: '#F9FAFB',
+    color: '#111827',
   },
-  clearBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#F1C40F', // Accent (강조/결과)
-  },
-  clearText: {
-    color: '#2C3E50',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  list: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-    paddingHorizontal: 16,
-  },
-  messageContainer: {
-    marginVertical: 4,
-  },
-  myMessageContainer: {
-    alignItems: 'flex-end',
-  },
-  yourMessageContainer: {
-    alignItems: 'flex-start',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    marginLeft: 8,
-  },
-  avatar: {
-    fontSize: 16,
-    marginRight: 6,
-  },
-  displayName: {
-    fontSize: 12,
-    color: '#2C3E50',
-    fontWeight: '600',
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  myBubble: {
-    backgroundColor: '#2ECC71', // Secondary (평화/조화)
-    borderBottomRightRadius: 4,
-  },
-  yourBubble: {
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  myText: {
-    color: '#FFFFFF',
-  },
-  yourText: {
-    color: '#2C3E50',
-  },
-  timestamp: {
-    fontSize: 11,
-    marginTop: 4,
-    opacity: 0.7,
-  },
-  myTimestamp: {
-    color: '#FFFFFF',
-    textAlign: 'right',
-  },
-  yourTimestamp: {
-    color: '#6B7280',
-    textAlign: 'left',
-  },
-  systemMsg: {
-    alignItems: 'center',
-    marginVertical: 8,
-  },
-  systemText: {
-    fontSize: 12,
-    color: '#6B7280',
-    backgroundColor: '#E5E7EB',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  inputBar: {
-    flexDirection: 'row',
+  listContent: {
     padding: 16,
+  },
+  groupCard: {
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  input: {
-    flex: 1,
-    height: 48,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 24,
-    backgroundColor: '#F9FAFB',
-    fontSize: 16,
-    color: '#2C3E50',
-  },
-  sendBtn: {
-    marginLeft: 12,
-    backgroundColor: '#2ECC71', // Secondary (평화/조화)
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
-    justifyContent: 'center',
-    shadowColor: '#2ECC71',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  sendText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  newMessageBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#F1C40F', // Accent (강조/결과)
-    borderTopWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  newMessageBtn: {
-    backgroundColor: '#2C3E50', // Primary (신뢰/전문성)
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 24,
-    alignSelf: 'center',
-    shadowColor: '#2C3E50',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  newMessageText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  logoutBtn: {
-    backgroundColor: '#E74C3C',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    shadowColor: '#E74C3C',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 2,
   },
-  logoutText: {
-    color: '#FFFFFF',
+  groupCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  groupInfo: {
+    flex: 1,
+  },
+  groupName: {
+    fontSize: 16,
     fontWeight: '600',
-    fontSize: 12,
+    color: '#111827',
+    marginBottom: 4,
+  },
+  groupDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  chatArrow: {
+    fontSize: 24,
+    color: '#9CA3AF',
+    marginLeft: 12,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: '#9CA3AF',
   },
 });

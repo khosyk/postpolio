@@ -136,6 +136,11 @@ export interface CreateGroupRequest {
   description?: string;
 }
 
+export interface UpdateGroupRequest {
+  name?: string;
+  description?: string;
+}
+
 export interface InviteMemberRequest {
   email: string;
 }

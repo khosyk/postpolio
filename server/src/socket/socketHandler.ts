@@ -1,105 +1,122 @@
 import { Server as SocketIOServer } from 'socket.io';
-import { Message } from '../types';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
   SocketData,
 } from '../types/socket';
+import messageService from '../services/messageService';
+import groupRepository from '../repositories/groupRepository';
+import userRepository from '../repositories/userRepository';
 
-// In-memory room state (demo only)
-const roomIdToMessages = new Map<string, Message[]>(); // roomId -> message[]
+// In-memory room state (실시간 사용자 추적용)
 const roomIdToUsers = new Map<string, Set<string>>(); // roomId -> Set<userId>
-
-// Helper to generate user info
-const generateUserInfo = (socketId: string): { displayName: string; avatar: string } => {
-  const adjectives = ['행복한', '즐거운', '친절한', '똑똑한', '용감한'];
-  const nouns = ['사자', '호랑이', '코끼리', '기린', '펭귄'];
-  const emojis = ['😀', '😎', '🤩', '🥳', '😇', '🚀', '💡', '🌟', '🌈', '🤖'];
-
-  const randomAdjective = adjectives[Math.floor(Math.random() * adjectives.length)] ?? '행복한';
-  const randomNoun = nouns[Math.floor(Math.random() * nouns.length)] ?? '펭귄';
-  const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)] ?? '🙂';
-
-  return {
-    displayName: `${randomAdjective} ${randomNoun} ${socketId.slice(0, 4)}`,
-    avatar: randomEmoji,
-  };
-};
 
 export const setupSocketHandlers = (
   io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>
 ) => {
-  io.on('connection', socket => {
-    console.log('client connected', socket.id);
+  io.on('connection', async socket => {
+    const userId = socket.data.userId;
+    const email = socket.data.email;
 
-    // Assign user info on connection
-    const userInfo = generateUserInfo(socket.id);
-    socket.data.displayName = userInfo.displayName;
-    socket.data.avatar = userInfo.avatar;
-    const { displayName, avatar } = socket.data as SocketData;
+    if (!userId) {
+      console.error('Socket connected without userId');
+      socket.disconnect();
+      return;
+    }
 
-    socket.on('join', (roomId: string) => {
-      if (!roomId) return;
-      socket.join(roomId);
+    console.log('client connected', socket.id, 'userId:', userId);
 
-      // track presence
-      if (!roomIdToUsers.has(roomId)) roomIdToUsers.set(roomId, new Set());
-      roomIdToUsers.get(roomId)?.add(socket.id);
+    // 사용자 프로필 로드
+    let userProfile = null;
+    try {
+      userProfile = await userRepository.getUserProfile(userId);
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
 
-      // send joined ACK + history to self
-      const history = roomIdToMessages.get(roomId) ?? [];
-      socket.emit('joined', {
-        roomId,
-        userId: socket.id,
-        displayName,
-        avatar,
-        history,
-      });
+    const displayName = userProfile?.nickname || email?.split('@')[0] || '알 수 없음';
+    const avatar = userProfile?.avatar || '👤';
 
-      // notify others in room
-      socket.to(roomId).emit('system', {
-        kind: 'join',
-        userId: socket.id,
-        displayName,
-        avatar,
-        roomId,
-      });
+    socket.data.displayName = displayName;
+    socket.data.avatar = avatar;
+
+    socket.on('join', async (roomId: string) => {
+      if (!roomId || !userId) return;
+
+      try {
+        // 그룹 멤버인지 확인
+        const isMember = await groupRepository.isMember(roomId, userId);
+        if (!isMember) {
+          socket.emit('error', { message: '그룹 멤버만 채팅방에 입장할 수 있습니다.' });
+          return;
+        }
+
+        socket.join(roomId);
+
+        // track presence
+        if (!roomIdToUsers.has(roomId)) roomIdToUsers.set(roomId, new Set());
+        roomIdToUsers.get(roomId)?.add(userId);
+
+        // 메시지 히스토리 조회
+        const history = await messageService.getGroupMessages(roomId, userId, 100, 0);
+
+        // send joined ACK + history to self
+        socket.emit('joined', {
+          roomId,
+          userId,
+          displayName,
+          avatar,
+          history,
+        });
+
+        // notify others in room
+        socket.to(roomId).emit('system', {
+          kind: 'join',
+          userId,
+          displayName,
+          avatar,
+          roomId,
+        });
+      } catch (error) {
+        console.error('Error joining room:', error);
+        socket.emit('error', { message: '채팅방 입장 중 오류가 발생했습니다.' });
+      }
     });
 
-    socket.on('message', ({ roomId, text }: { roomId: string; text: string }) => {
-      if (!roomId || !text) return;
-      const payload: Message = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        text,
-        userId: socket.id,
-        displayName,
-        avatar,
-        createdAt: new Date().toISOString(),
-        type: 'message',
-      };
-      if (!roomIdToMessages.has(roomId)) roomIdToMessages.set(roomId, []);
-      roomIdToMessages.get(roomId)?.push(payload);
-      io.to(roomId).emit('message', payload);
-    });
+    socket.on('message', async ({ roomId, text }: { roomId: string; text: string }) => {
+      if (!roomId || !text || !userId) return;
 
-    socket.on('clearHistory', ({ roomId }: { roomId: string }) => {
-      if (!roomId) return;
-      roomIdToMessages.set(roomId, []);
-      io.to(roomId).emit('historyCleared', { roomId, by: socket.id });
+      try {
+        // 그룹 멤버인지 확인
+        const isMember = await groupRepository.isMember(roomId, userId);
+        if (!isMember) {
+          socket.emit('error', { message: '그룹 멤버만 메시지를 전송할 수 있습니다.' });
+          return;
+        }
+
+        // 메시지 생성 및 저장
+        const message = await messageService.createMessage(roomId, userId, text);
+
+        // 모든 클라이언트에 메시지 전송
+        io.to(roomId).emit('message', message);
+      } catch (error) {
+        console.error('Error sending message:', error);
+        socket.emit('error', { message: '메시지 전송 중 오류가 발생했습니다.' });
+      }
     });
 
     socket.on('leave', (roomId: string) => {
-      if (!roomId) return;
+      if (!roomId || !userId) return;
       socket.leave(roomId);
       const users = roomIdToUsers.get(roomId);
       if (users) {
-        users.delete(socket.id);
+        users.delete(userId);
         if (users.size === 0) roomIdToUsers.delete(roomId);
       }
       socket.to(roomId).emit('system', {
         kind: 'leave',
-        userId: socket.id,
+        userId,
         displayName,
         avatar,
         roomId,
@@ -111,11 +128,19 @@ export const setupSocketHandlers = (
       for (const roomId of socket.rooms) {
         if (roomId === socket.id) continue;
         const users = roomIdToUsers.get(roomId);
-        if (users) {
-          users.delete(socket.id);
+        if (users && userId) {
+          users.delete(userId);
           if (users.size === 0) roomIdToUsers.delete(roomId);
         }
-        socket.to(roomId).emit('system', { kind: 'leave', userId: socket.id, roomId });
+        if (userId) {
+          socket.to(roomId).emit('system', {
+            kind: 'leave',
+            userId,
+            displayName,
+            avatar,
+            roomId,
+          });
+        }
       }
     });
 

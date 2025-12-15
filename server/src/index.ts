@@ -5,6 +5,7 @@ import cors from 'cors';
 import { Server } from 'socket.io';
 import authRoutes from './routes/authRoutes';
 import groupRoutes from './routes/groupRoutes';
+import messageRoutes from './routes/messageRoutes';
 import { setupSocketHandlers } from './socket/socketHandler';
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(express.json());
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api', messageRoutes);
 
 app.get('/', (_req, res) => {
   res.send('WebSocket server is running');
@@ -29,10 +31,11 @@ const io = new Server(server, {
     origin: CORS_ORIGIN,
     methods: ['GET', 'POST'],
   },
-}); 
+});
 
-// 인증 미들웨어 적용 (선택적)
-// io.use(require('./middleware/authMiddleware').socketAuthMiddleware);
+// 인증 미들웨어 적용
+import { socketAuthMiddleware } from './middleware/authMiddleware';
+io.use(socketAuthMiddleware);
 
 // Setup socket handlers
 setupSocketHandlers(io);

@@ -1,6 +1,6 @@
 import groupRepository from '../repositories/groupRepository';
 import userRepository from '../repositories/userRepository';
-import { StudyGroup, CreateGroupRequest, GroupWithMembers } from '../types';
+import { StudyGroup, CreateGroupRequest, UpdateGroupRequest, GroupWithMembers } from '../types';
 
 class GroupService {
   // 그룹 생성 + 소유자 자동 추가
@@ -115,6 +115,32 @@ class GroupService {
       await groupRepository.removeMember(groupId, userId);
     } catch (error) {
       console.error('Error leaving group:', error);
+      throw error;
+    }
+  }
+
+  // 그룹 수정 (소유자만)
+  async updateGroup(
+    groupId: string,
+    userId: string,
+    groupData: UpdateGroupRequest
+  ): Promise<StudyGroup> {
+    try {
+      // 1. 그룹 존재 확인
+      const group = await groupRepository.getGroupById(groupId);
+      if (!group) {
+        throw new Error('그룹을 찾을 수 없습니다.');
+      }
+
+      // 2. 소유자인지 확인
+      if (group.owner_id !== userId) {
+        throw new Error('그룹 소유자만 수정할 수 있습니다.');
+      }
+
+      // 3. 그룹 수정
+      return await groupRepository.updateGroup(groupId, groupData);
+    } catch (error) {
+      console.error('Error updating group:', error);
       throw error;
     }
   }

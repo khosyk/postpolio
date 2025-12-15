@@ -31,9 +31,14 @@ export const API_CONFIG = {
       LIST: '/api/groups',
       CREATE: '/api/groups',
       DETAIL: (id: string) => `/api/groups/${id}`,
+      UPDATE: (id: string) => `/api/groups/${id}`,
       INVITE: (id: string) => `/api/groups/${id}/invite`,
       LEAVE: (id: string) => `/api/groups/${id}/leave`,
       DELETE: (id: string) => `/api/groups/${id}`,
+    },
+    // 메시지 관련
+    MESSAGES: {
+      LIST: (groupId: string) => `/api/groups/${groupId}/messages`,
     },
   },
 } as const;
@@ -62,4 +67,11 @@ export const getGroupUrl = (key: keyof typeof API_CONFIG.ENDPOINTS.GROUPS, id?: 
     return getApiUrl(endpoint(id));
   }
   return getApiUrl(endpoint);
+};
+
+/**
+ * 메시지 API URL 헬퍼
+ */
+export const getMessageUrl = (groupId: string): string => {
+  return getApiUrl(API_CONFIG.ENDPOINTS.MESSAGES.LIST(groupId));
 };

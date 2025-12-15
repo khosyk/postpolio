@@ -1,7 +1,11 @@
 import express, { Request, Response } from 'express';
 import groupService from '../services/groupService';
 import { isZodError, getErrorMessage } from '../utils/error';
-import { CreateGroupSchema, InviteMemberSchema } from '../../../shared/schemas/group';
+import {
+  CreateGroupSchema,
+  UpdateGroupSchema,
+  InviteMemberSchema,
+} from '../../../shared/schemas/group';
 import { expressAuthMiddleware } from '../middleware/authMiddleware';
 
 const router = express.Router();
@@ -107,6 +111,39 @@ router.get('/:id', async (req: Request, res: Response) => {
     res.status(status).json({
       success: false,
       message: msg,
+    });
+  }
+});
+
+// 그룹 수정
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const groupId = getGroupId(req);
+    const parsed = UpdateGroupSchema.parse(req.body);
+    const userId = getUserId(req);
+
+    const group = await groupService.updateGroup(groupId, userId, parsed);
+
+    res.json({
+      success: true,
+      message: '그룹이 수정되었습니다.',
+      data: { group },
+    });
+  } catch (error: unknown) {
+    console.error('Update group route error:', error);
+
+    const msg = getErrorMessage(error);
+    const status = isZodError(error)
+      ? 400
+      : msg.includes('소유자만')
+        ? 403
+        : msg.includes('찾을 수 없습니다')
+          ? 404
+          : 500;
+
+    res.status(status).json({
+      success: false,
+      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
     });
   }
 });

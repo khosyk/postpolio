@@ -18,6 +18,7 @@ import { getAuthUrl, getGroupUrl } from '@/config/api';
 import BlockingLoader from '@/components/BlockingLoader';
 import { StudyGroup } from '@/types/group';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { SkeletonChip } from '@/components/Skeleton';
 
 const FAVORITES_STORAGE_KEY = 'group_favorites';
 
@@ -27,6 +28,7 @@ const HomeScreen = () => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [groups, setGroups] = useState<StudyGroup[]>([]);
+  const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
   const nickname =
@@ -62,7 +64,10 @@ const HomeScreen = () => {
   const fetchGroups = async () => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      if (!token) return;
+      if (!token) {
+        setLoading(false);
+        return;
+      }
 
       const response = await fetch(getGroupUrl('LIST'), {
         method: 'GET',
@@ -78,14 +83,19 @@ const HomeScreen = () => {
       }
     } catch {
       // 그룹 목록 조회 실패 시 무시 (사용자 경험 저해 방지)
+    } finally {
+      setLoading(false);
     }
   };
 
   // 초기 로드
   useEffect(() => {
     if (user) {
+      setLoading(true);
       loadFavorites();
       fetchGroups();
+    } else {
+      setLoading(false);
     }
   }, [user]);
 
@@ -127,7 +137,7 @@ const HomeScreen = () => {
   }, [groups, favorites]);
 
   const handleCreateGroup = () => {
-    router.push('/(tabs)/groups/create');
+    router.push('/groups/create');
   };
 
   const handleGroupPress = (groupId: string) => {
@@ -216,15 +226,27 @@ const HomeScreen = () => {
       <View style={styles.content}>
         <View style={styles.headerSection}>
           <Text style={styles.sectionTitle}>내 스터디 그룹</Text>
-          <TouchableOpacity style={styles.createButton} onPress={handleCreateGroup}>
-            <Text style={styles.createButtonText}>+ 그룹 만들기</Text>
-          </TouchableOpacity>
         </View>
 
-        {groups.length === 0 ? (
+        {loading ? (
+          <View style={styles.groupsContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.groupsScrollContent}
+            >
+              {[1, 2, 3, 4, 5].map(i => (
+                <SkeletonChip key={i} />
+              ))}
+            </ScrollView>
+          </View>
+        ) : groups.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>아직 그룹이 없습니다.</Text>
-            <Text style={styles.emptySubText}>그룹을 만들어 스터디를 시작해보세요!</Text>
+            <Text style={styles.emptyText}>그룹 없음</Text>
+            <Text style={styles.emptySubText}>새로 생성하기</Text>
+            <TouchableOpacity style={styles.emptyCreateButton} onPress={handleCreateGroup}>
+              <Text style={styles.emptyCreateButtonText}>그룹 만들기</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.groupsContainer}>
@@ -248,9 +270,17 @@ const HomeScreen = () => {
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
                       <IconSymbol
-                        name={isFavorite ? 'star' : 'star-border'}
-                        size={14}
-                        color={isFavorite ? '#FFD700' : '#fff'}
+                        name={'star'}
+                        style={{
+                          borderRadius: 14,
+                          shadowColor: 'rgba(255, 214, 0, 1)',
+                          shadowOffset: { width: 1, height: 1 },
+                          shadowOpacity: 1,
+                          shadowRadius: 1,
+                          elevation: 2,
+                        }}
+                        size={isFavorite ? 17 : 16}
+                        color={isFavorite ? 'rgba(255, 214, 0, 1)' : 'rgba(255, 214, 0, 0.3)'}
                       />
                     </Pressable>
                     <View style={styles.chipContent}>
@@ -359,9 +389,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   headerSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginTop: 16,
     marginBottom: 16,
   },
@@ -369,17 +396,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: '#111827',
-  },
-  createButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#2563EB',
-  },
-  createButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
   groupsContainer: {},
   groupsScrollContent: {
@@ -433,15 +449,6 @@ const styles = StyleSheet.create({
     bottom: 2,
     right: 2,
     zIndex: 1,
-    borderRadius: 10,
-    padding: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 1, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
-    borderWidth: 0.5,
-    borderColor: '#E5E7EB',
   },
   chipContent: {
     alignItems: 'center',
@@ -477,6 +484,18 @@ const styles = StyleSheet.create({
   emptySubText: {
     fontSize: 14,
     color: '#9CA3AF',
+    marginBottom: 24,
+  },
+  emptyCreateButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+  },
+  emptyCreateButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   backdrop: {
     flex: 1,

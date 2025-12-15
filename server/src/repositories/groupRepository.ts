@@ -132,6 +132,38 @@ class GroupRepository {
     }
   }
 
+  // 그룹 수정
+  async updateGroup(
+    groupId: string,
+    groupData: { name?: string; description?: string }
+  ): Promise<StudyGroup> {
+    try {
+      const updateData: { name?: string; description?: string | null; updated_at: string } = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (groupData.name !== undefined) {
+        updateData.name = groupData.name;
+      }
+      if (groupData.description !== undefined) {
+        updateData.description = groupData.description || null;
+      }
+
+      const { data, error } = await supabase
+        .from('study_groups')
+        .update(updateData)
+        .eq('id', groupId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error updating group:', error);
+      throw error;
+    }
+  }
+
   // 그룹 삭제
   async deleteGroup(groupId: string): Promise<void> {
     try {

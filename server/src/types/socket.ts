@@ -1,8 +1,10 @@
 import type { Message } from './index';
 
 export interface SocketData {
-  displayName: string;
-  avatar: string;
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  avatar?: string;
 }
 
 export interface ClientToServerEvents {
@@ -28,7 +30,7 @@ export interface ServerToClientEvents {
     roomId: string;
   }) => void;
   message: (payload: Message) => void;
-  historyCleared: (payload: { roomId: string; by: string }) => void;
+  error: (payload: { message: string }) => void;
 }
 
 export interface InterServerEvents {}
