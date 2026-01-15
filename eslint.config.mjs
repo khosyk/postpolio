@@ -82,7 +82,7 @@ export default [
       'prefer-template': 'error',
       'template-curly-spacing': 'error',
       'arrow-spacing': 'error',
-      'comma-dangle': ['error', 'always-multiline'],
+      // comma-dangle은 Prettier가 처리하므로 제거 (eslint-config-prettier가 비활성화)
       'quotes': ['error', 'single', { avoidEscape: true }],
       'semi': ['error', 'always'],
       'indent': ['error', 2, { SwitchCase: 1 }],
