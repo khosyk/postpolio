@@ -1,12 +1,16 @@
 import express, { Request, Response } from 'express';
 import groupService from '../services/groupService';
-import { isZodError, getErrorMessage } from '../utils/error';
+import studyService from '../services/studyService';
+import { AppError } from '../middleware/errorHandler';
 import {
   CreateGroupSchema,
   UpdateGroupSchema,
+  UpdateGroupSettingsSchema,
   InviteMemberSchema,
 } from '../../../shared/schemas/group';
 import { expressAuthMiddleware } from '../middleware/authMiddleware';
+import { asyncHandler } from '../utils/asyncHandler';
+import { sendSuccess } from '../utils/response';
 
 const router = express.Router();
 
@@ -36,192 +40,124 @@ const getGroupId = (req: Request): string => {
 };
 
 // 그룹 생성
-router.post('/', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/',
+  asyncHandler(async (req: Request, res: Response) => {
     const parsed = CreateGroupSchema.parse(req.body);
     const userId = getUserId(req);
 
     const group = await groupService.createGroup(userId, parsed);
 
-    res.status(201).json({
-      success: true,
-      message: '그룹이 생성되었습니다.',
-      data: { group },
-    });
-  } catch (error: unknown) {
-    console.error('Create group route error:', error);
-
-    const msg = getErrorMessage(error);
-    const status = isZodError(error) ? 400 : 500;
-
-    res.status(status).json({
-      success: false,
-      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
-    });
-  }
-});
+    sendSuccess(res, { group }, '그룹이 생성되었습니다.', 201);
+  })
+);
 
 // 내 그룹 목록 조회
-router.get('/', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (req: Request, res: Response) => {
     const userId = getUserId(req);
-
     const groups = await groupService.getUserGroups(userId);
-
-    res.json({
-      success: true,
-      data: { groups },
-    });
-  } catch (error: unknown) {
-    console.error('Get user groups route error:', error);
-
-    res.status(500).json({
-      success: false,
-      message: '그룹 목록 조회 중 오류가 발생했습니다.',
-    });
-  }
-});
+    sendSuccess(res, { groups });
+  })
+);
 
 // 그룹 상세 조회
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
     const groupId = getGroupId(req);
     const userId = getUserId(req);
 
     const group = await groupService.getGroupById(groupId, userId);
 
     if (!group) {
-      res.status(404).json({
-        success: false,
-        message: '그룹을 찾을 수 없습니다.',
-      });
-      return;
+      throw new AppError(404, '그룹을 찾을 수 없습니다.');
     }
 
-    res.json({
-      success: true,
-      data: { group },
-    });
-  } catch (error: unknown) {
-    console.error('Get group route error:', error);
-
-    const msg = getErrorMessage(error);
-    const status = msg.includes('멤버만') ? 403 : 500;
-
-    res.status(status).json({
-      success: false,
-      message: msg,
-    });
-  }
-});
+    sendSuccess(res, { group });
+  })
+);
 
 // 그룹 수정
-router.put('/:id', async (req: Request, res: Response) => {
-  try {
+router.put(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
     const groupId = getGroupId(req);
     const parsed = UpdateGroupSchema.parse(req.body);
     const userId = getUserId(req);
 
     const group = await groupService.updateGroup(groupId, userId, parsed);
 
-    res.json({
-      success: true,
-      message: '그룹이 수정되었습니다.',
-      data: { group },
-    });
-  } catch (error: unknown) {
-    console.error('Update group route error:', error);
+    sendSuccess(res, { group }, '그룹이 수정되었습니다.');
+  })
+);
 
-    const msg = getErrorMessage(error);
-    const status = isZodError(error)
-      ? 400
-      : msg.includes('소유자만')
-        ? 403
-        : msg.includes('찾을 수 없습니다')
-          ? 404
-          : 500;
+// 그룹 설정 변경
+router.put(
+  '/:id/settings',
+  asyncHandler(async (req: Request, res: Response) => {
+    const groupId = getGroupId(req);
+    const parsed = UpdateGroupSettingsSchema.parse(req.body);
+    const userId = getUserId(req);
 
-    res.status(status).json({
-      success: false,
-      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
-    });
-  }
-});
+    const group = await groupService.updateGroupSettings(groupId, userId, parsed);
+
+    sendSuccess(res, { group }, '그룹 설정이 변경되었습니다.');
+  })
+);
 
 // 멤버 초대
-router.post('/:id/invite', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/:id/invite',
+  asyncHandler(async (req: Request, res: Response) => {
     const groupId = getGroupId(req);
     const parsed = InviteMemberSchema.parse(req.body);
     const userId = getUserId(req);
 
     await groupService.inviteMember(groupId, userId, parsed.email);
 
-    res.json({
-      success: true,
-      message: '멤버가 초대되었습니다.',
-    });
-  } catch (error: unknown) {
-    console.error('Invite member route error:', error);
-
-    const msg = getErrorMessage(error);
-    const status = isZodError(error) ? 400 : msg.includes('찾을 수 없습니다') ? 404 : 500;
-
-    res.status(status).json({
-      success: false,
-      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
-    });
-  }
-});
+    sendSuccess(res, undefined, '멤버가 초대되었습니다.');
+  })
+);
 
 // 그룹 나가기
-router.delete('/:id/leave', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/:id/leave',
+  asyncHandler(async (req: Request, res: Response) => {
     const groupId = getGroupId(req);
     const userId = getUserId(req);
 
     await groupService.leaveGroup(groupId, userId);
 
-    res.json({
-      success: true,
-      message: '그룹에서 나갔습니다.',
-    });
-  } catch (error: unknown) {
-    console.error('Leave group route error:', error);
-
-    const msg = getErrorMessage(error);
-    const status = msg.includes('소유자') ? 403 : msg.includes('찾을 수 없습니다') ? 404 : 500;
-
-    res.status(status).json({
-      success: false,
-      message: msg,
-    });
-  }
-});
+    sendSuccess(res, undefined, '그룹에서 나갔습니다.');
+  })
+);
 
 // 그룹 삭제
-router.delete('/:id', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
     const groupId = getGroupId(req);
     const userId = getUserId(req);
 
     await groupService.deleteGroup(groupId, userId);
 
-    res.json({
-      success: true,
-      message: '그룹이 삭제되었습니다.',
-    });
-  } catch (error: unknown) {
-    console.error('Delete group route error:', error);
+    sendSuccess(res, undefined, '그룹이 삭제되었습니다.');
+  })
+);
 
-    const msg = getErrorMessage(error);
-    const status = msg.includes('소유자만') ? 403 : msg.includes('찾을 수 없습니다') ? 404 : 500;
+// 그룹 멤버들의 오늘 공부시간 조회 (그룹 챗 탭용)
+router.get(
+  '/:id/members/study-time',
+  asyncHandler(async (req: Request, res: Response) => {
+    const groupId = getGroupId(req);
+    const userId = getUserId(req);
 
-    res.status(status).json({
-      success: false,
-      message: msg,
-    });
-  }
-});
+    const membersStudyTime = await studyService.getGroupMembersStudyTime(groupId, userId);
+
+    sendSuccess(res, { members: membersStudyTime });
+  })
+);
 
 export default router;

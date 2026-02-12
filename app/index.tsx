@@ -3,7 +3,8 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
-export default function Index() {
+// 인덱스 화면 컴포넌트 (인증 상태에 따라 리다이렉트)
+const Index = () => {
   const { user, loading } = useAuth();
 
   useEffect(() => {
@@ -25,7 +26,9 @@ export default function Index() {
   }
 
   return null;
-}
+};
+
+export default Index;
 
 const styles = StyleSheet.create({
   container: {

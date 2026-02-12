@@ -1,0 +1,127 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
+
+import { getAuthUrl } from '@/config/api';
+
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+
+interface ApiFetchOptions extends RequestInit {
+  method?: HttpMethod;
+  /** 토큰이 반드시 필요한 요청인지 여부 (기본값: true) */
+  requireAuth?: boolean;
+  /** 인증 에러(401/403) 발생 시 자동으로 로그아웃 및 리다이렉트할지 여부 (기본값: true) */
+  autoHandleAuthError?: boolean;
+}
+
+/**
+ * 공통 API 요청 헬퍼
+ * - accessToken 자동 첨부
+ * - 401/403 발생 시 토큰/유저 정보 정리 후 로그인 화면으로 리다이렉트
+ * - 서버 응답 형식: { success, message, data } 가정
+ */
+export const apiFetch = async <TResponse = any>(
+  url: string,
+  {
+    method = 'GET',
+    requireAuth = true,
+    autoHandleAuthError = true,
+    headers,
+    ...rest
+  }: ApiFetchOptions = {},
+): Promise<TResponse> => {
+  let token: string | null = null;
+
+  try {
+    if (requireAuth) {
+      token = await AsyncStorage.getItem('accessToken');
+      if (!token) {
+        if (autoHandleAuthError) {
+          await clearAuthAndRedirect();
+        }
+        throw new Error('인증 토큰이 없습니다.');
+      }
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(headers || {}),
+      },
+      ...rest,
+    });
+
+    const data = (await response.json().catch(() => undefined)) as any;
+
+    // 인증 에러 공통 처리
+    if (response.status === 401 || response.status === 403) {
+      if (autoHandleAuthError) {
+        await clearAuthAndRedirect();
+      }
+      throw new Error(data?.message || '인증이 만료되었거나 유효하지 않습니다.');
+    }
+
+    if (!response.ok || data?.success === false) {
+      const msg = data?.message || '요청 처리 중 오류가 발생했습니다.';
+      throw new Error(msg);
+    }
+
+    return data as TResponse;
+  } catch (error) {
+    // 여기서 로그를 남기거나 Sentry 등으로 전송 가능
+    throw error;
+  }
+};
+
+/**
+ * 인증 상태 정리 및 로그인 화면으로 리다이렉트
+ * - 서버 로그아웃 시도
+ * - 로컬 스토리지 정리
+ * - 로그인 화면으로 이동
+ */
+const clearAuthAndRedirect = async () => {
+  try {
+    const token = await AsyncStorage.getItem('accessToken');
+    if (token) {
+      // 서버 로그아웃은 베스트 에포트; 실패해도 무시
+      await fetch(getAuthUrl('LOGOUT'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => undefined);
+    }
+  } catch {
+    // 무시
+  } finally {
+    await AsyncStorage.removeItem('user');
+    await AsyncStorage.removeItem('accessToken');
+    router.replace('/(auth)/login');
+  }
+};
+
+/**
+ * 개발용 테스트 함수
+ * - 의도적으로 잘못된 토큰을 설정하고 호출하여 인증 실패 흐름을 검증
+ * - 실제 앱 UI에는 연결하지 않고, 필요 시 임시로 호출해서 동작 확인용으로 사용
+ */
+export const testAuthFailureFlow = async () => {
+  // 잘못된 토큰 설정
+  await AsyncStorage.setItem('accessToken', 'invalid-token-for-test');
+
+  try {
+    // 보호된 엔드포인트를 호출 (예: 프로필 조회)
+    await apiFetch(getAuthUrl('PROFILE'), {
+      method: 'GET',
+      requireAuth: true,
+    });
+  } catch (error) {
+    // 기대: clearAuthAndRedirect가 호출되고, 여기서 에러가 발생
+    // 실제 동작은 앱에서 직접 확인 (로그인 화면으로 리다이렉트 되는지)
+    console.log('testAuthFailureFlow caught error:', (error as Error).message);
+  }
+};
+
+

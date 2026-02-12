@@ -3,10 +3,15 @@ import authService from '../services/authService';
 import { SignInRequest, UserProfile } from '../types';
 import { isZodError, getErrorMessage } from '../utils/error';
 import { SignInSchema, SignUpSchema } from '../../../shared/schemas/auth';
+import { expressAuthMiddleware } from '../middleware/authMiddleware';
+import { authLimiter } from '../middleware/rateLimiter';
+import { asyncHandler } from '../utils/asyncHandler';
+import { sendSuccess, sendError } from '../utils/response';
+
 const router = express.Router();
 
 // 이메일 회원가입
-router.post('/signup', async (req: Request, res: Response) => {
+router.post('/signup', authLimiter, asyncHandler(async (req: Request, res: Response) => {
   try {
     const parsed = SignUpSchema.parse(req.body);
     const { email, password, displayName, avatar } = parsed;
@@ -16,17 +21,20 @@ router.post('/signup', async (req: Request, res: Response) => {
       avatar,
     });
 
-    res.status(201).json({
-      success: true,
-      message: '회원가입이 완료되었습니다.',
-      data: {
+    sendSuccess(
+      res,
+      {
         user: {
           id: result.user.id,
           email: result.user.email,
         },
         profile: result.profile,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
       },
-    });
+      '회원가입이 완료되었습니다.',
+      201
+    );
   } catch (error: unknown) {
     console.error('Signup route error:', error);
 
@@ -39,43 +47,34 @@ router.post('/signup', async (req: Request, res: Response) => {
           ? 400
           : 500;
 
-    res.status(status).json({
-      success: false,
-      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
-    });
+    sendError(res, isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg, status);
   }
-});
+}));
 
 // 이메일 로그인
-router.post('/signin', async (req: Request<{}, {}, SignInRequest>, res: Response) => {
+router.post('/signin', authLimiter, asyncHandler(async (req: Request<{}, {}, SignInRequest>, res: Response) => {
   try {
     const parsed = SignInSchema.parse(req.body);
     const { email, password } = parsed;
 
     const result = await authService.signInWithEmail(email, password);
 
-    res.json({
-      success: true,
-      message: '로그인되었습니다.',
-      data: {
-        user: {
-          id: result.user.id,
-          email: result.user.email,
-        },
-        profile: result.profile,
-        accessToken: result.accessToken,
+    sendSuccess(res, {
+      user: {
+        id: result.user.id,
+        email: result.user.email,
       },
-    });
+      profile: result.profile,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    }, '로그인되었습니다.');
   } catch (error: unknown) {
     console.error('Signin route error:', error);
     const msg = getErrorMessage(error);
     const status = isZodError(error) ? 400 : msg.includes('Invalid login credentials') ? 401 : 500;
-    res.status(status).json({
-      success: false,
-      message: isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg,
-    });
+    sendError(res, isZodError(error) ? '요청 본문이 유효하지 않습니다.' : msg, status);
   }
-});
+}));
 
 // 토큰 검증
 router.post('/verify', async (req: Request, res: Response) => {
@@ -130,22 +129,29 @@ router.post('/logout', async (_req: Request, res: Response) => {
   }
 });
 
-// 프로필 업데이트
-router.put('/profile', async (req: Request, res: Response) => {
+// 프로필 업데이트 (인증 필요)
+router.put('/profile', expressAuthMiddleware, async (req: Request, res: Response) => {
   try {
-    const { userId, displayName, avatar } = req.body;
+    interface AuthenticatedRequest extends Request {
+      user: { id: string; email: string | null };
+    }
+
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user?.id;
 
     if (!userId) {
-      res.status(400).json({
+      res.status(401).json({
         success: false,
-        message: '사용자 ID가 필요합니다.',
+        message: '인증이 필요합니다.',
       });
       return;
     }
 
+    const { displayName, avatar } = req.body;
+
     const updateData: Partial<UserProfile> = {};
-    if (displayName) updateData.nickname = displayName;
-    if (avatar) updateData.avatar = avatar;
+    if (displayName !== undefined) updateData.nickname = displayName;
+    if (avatar !== undefined) updateData.avatar = avatar;
 
     const profile = await authService.updateProfile(userId, updateData);
 
@@ -156,10 +162,45 @@ router.put('/profile', async (req: Request, res: Response) => {
     });
   } catch (error: unknown) {
     console.error('Profile update error:', error);
+    const msg = getErrorMessage(error);
 
     res.status(500).json({
       success: false,
-      message: '프로필 업데이트 중 오류가 발생했습니다.',
+      message: msg || '프로필 업데이트 중 오류가 발생했습니다.',
+    });
+  }
+});
+
+// Refresh Token으로 Access Token 갱신
+router.post('/refresh', async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      res.status(400).json({
+        success: false,
+        message: 'refreshToken이 필요합니다.',
+      });
+      return;
+    }
+
+    const result = await authService.refreshAccessToken(refreshToken);
+
+    res.json({
+      success: true,
+      message: '토큰이 갱신되었습니다.',
+      data: {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+      },
+    });
+  } catch (error: unknown) {
+    console.error('Refresh token route error:', error);
+    const msg = getErrorMessage(error);
+
+    res.status(401).json({
+      success: false,
+      message: msg || '토큰 갱신에 실패했습니다.',
     });
   }
 });

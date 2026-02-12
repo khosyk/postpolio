@@ -6,8 +6,10 @@ import type {
   SocketData,
 } from '../types/socket';
 import messageService from '../services/messageService';
+import studyService from '../services/studyService';
 import groupRepository from '../repositories/groupRepository';
 import userRepository from '../repositories/userRepository';
+import { logger } from '../utils/logger';
 
 // In-memory room state (실시간 사용자 추적용)
 const roomIdToUsers = new Map<string, Set<string>>(); // roomId -> Set<userId>
@@ -20,22 +22,23 @@ export const setupSocketHandlers = (
     const email = socket.data.email;
 
     if (!userId) {
-      console.error('Socket connected without userId');
+      logger.error('Socket connected without userId', { socketId: socket.id });
       socket.disconnect();
       return;
     }
 
-    console.log('client connected', socket.id, 'userId:', userId);
+    logger.info('Socket client connected', { socketId: socket.id, userId });
 
     // 사용자 프로필 로드
     let userProfile = null;
     try {
       userProfile = await userRepository.getUserProfile(userId);
     } catch (error) {
-      console.error('Error loading user profile:', error);
+      logger.error('Error loading user profile', { userId, error });
     }
 
-    const displayName = userProfile?.nickname || email?.split('@')[0] || '알 수 없음';
+    const rawName = userProfile?.nickname || email?.split('@')[0] || '알 수 없음';
+    const displayName = rawName.length > 8 ? rawName.slice(0, 8) : rawName;
     const avatar = userProfile?.avatar || '👤';
 
     socket.data.displayName = displayName;
@@ -79,7 +82,7 @@ export const setupSocketHandlers = (
           roomId,
         });
       } catch (error) {
-        console.error('Error joining room:', error);
+        logger.error('Error joining room', { roomId, userId, error });
         socket.emit('error', { message: '채팅방 입장 중 오류가 발생했습니다.' });
       }
     });
@@ -95,13 +98,25 @@ export const setupSocketHandlers = (
           return;
         }
 
+        // 그룹 정보 조회 및 chat_enabled 확인
+        const group = await groupRepository.getGroupById(roomId);
+        if (!group) {
+          socket.emit('error', { message: '그룹을 찾을 수 없습니다.' });
+          return;
+        }
+
+        if (!group.chat_enabled) {
+          socket.emit('error', { message: '이 그룹의 채팅이 비활성화되어 있습니다.' });
+          return;
+        }
+
         // 메시지 생성 및 저장
         const message = await messageService.createMessage(roomId, userId, text);
 
         // 모든 클라이언트에 메시지 전송
         io.to(roomId).emit('message', message);
       } catch (error) {
-        console.error('Error sending message:', error);
+        logger.error('Error sending message', { roomId, userId, error });
         socket.emit('error', { message: '메시지 전송 중 오류가 발생했습니다.' });
       }
     });
@@ -144,8 +159,176 @@ export const setupSocketHandlers = (
       }
     });
 
+    // 공부 세션 시작 (Phase 6)
+    socket.on('study:start', async ({ groupId }: { groupId: string }) => {
+      if (!groupId || !userId) return;
+
+      try {
+        await studyService.startStudySession(groupId, userId);
+        socket.emit('study:time:update', {
+          groupId,
+          userId,
+          totalMinutes: 0,
+        });
+
+        // 랭킹 업데이트
+        const ranking = await studyService.getTop5Ranking(groupId);
+        io.to(groupId).emit('study:ranking:update', {
+          groupId,
+          ranking,
+        });
+
+        // 그룹 멤버들의 공부시간 업데이트 (그룹 챗 탭용)
+        try {
+          const membersStudyTime = await studyService.getGroupMembersStudyTime(groupId, userId);
+          io.to(groupId).emit('study:members:time:update', {
+            groupId,
+            members: membersStudyTime,
+          });
+        } catch (error) {
+          logger.error('Error updating group members study time', { groupId, error });
+        }
+      } catch (error) {
+        logger.error('Error starting study session', { groupId, userId, error });
+        socket.emit('error', {
+          message:
+            error instanceof Error ? error.message : '공부 세션 시작 중 오류가 발생했습니다.',
+        });
+      }
+    });
+
+    // 공부 세션 종료 (Phase 6)
+    socket.on('study:stop', async ({ groupId }: { groupId: string }) => {
+      if (!groupId || !userId) return;
+
+      try {
+        const session = await studyService.stopStudySession(groupId, userId);
+        socket.emit('study:time:update', {
+          groupId,
+          userId,
+          totalMinutes: session?.total_minutes || 0,
+        });
+
+        // 랭킹 업데이트
+        const ranking = await studyService.getTop5Ranking(groupId);
+        io.to(groupId).emit('study:ranking:update', {
+          groupId,
+          ranking,
+        });
+
+        // 그룹 멤버들의 공부시간 업데이트 (그룹 챗 탭용)
+        try {
+          const membersStudyTime = await studyService.getGroupMembersStudyTime(groupId, userId);
+          io.to(groupId).emit('study:members:time:update', {
+            groupId,
+            members: membersStudyTime,
+          });
+        } catch (error) {
+          logger.error('Error updating group members study time', { groupId, error });
+        }
+      } catch (error) {
+        logger.error('Error stopping study session', { groupId, userId, error });
+        socket.emit('error', {
+          message:
+            error instanceof Error ? error.message : '공부 세션 종료 중 오류가 발생했습니다.',
+        });
+      }
+    });
+
+    // 방장이 체크인 요청 (Phase 6)
+    socket.on('study:checkin:request', async ({ groupId }: { groupId: string }) => {
+      if (!groupId || !userId) return;
+
+      try {
+        const result = await studyService.requestCheckIn(groupId, userId);
+
+        // 모든 멤버에게 체크인 요청 전송
+        io.to(groupId).emit('study:checkin:request', {
+          groupId: result.groupId,
+          checkInInterval: result.checkInInterval,
+          activeSessions: result.activeSessions,
+        });
+      } catch (error) {
+        logger.error('Error requesting check-in', { groupId, userId, error });
+        socket.emit('error', {
+          message: error instanceof Error ? error.message : '체크인 요청 중 오류가 발생했습니다.',
+        });
+      }
+    });
+
+    // 체크인 버튼 클릭 (Phase 6)
+    socket.on(
+      'study:checkin:submit',
+      async ({ groupId, sessionId }: { groupId: string; sessionId: string }) => {
+        if (!groupId || !sessionId || !userId) return;
+
+        try {
+          const result = await studyService.submitCheckIn(groupId, userId, sessionId);
+
+          // 모든 멤버에게 체크인 완료 알림
+          io.to(groupId).emit('study:checkin:complete', {
+            groupId,
+            userId,
+            sessionId,
+            isValid: result.isValid,
+          });
+
+          // 랭킹 업데이트
+          const ranking = await studyService.getTop5Ranking(groupId);
+          io.to(groupId).emit('study:ranking:update', {
+            groupId,
+            ranking,
+          });
+        } catch (error) {
+          logger.error('Error submitting check-in', { groupId, userId, sessionId, error });
+          socket.emit('error', {
+            message: error instanceof Error ? error.message : '체크인 중 오류가 발생했습니다.',
+          });
+        }
+      }
+    );
+
+    // 공부 상태 조회 (Phase 6)
+    socket.on('study:status', async ({ groupId }: { groupId: string }) => {
+      if (!groupId || !userId) return;
+
+      try {
+        // 랭킹 / 오늘 통계 / 현재 활성 세션 / 그룹 멤버 공부시간을 한 번에 조회
+        const [ranking, status, membersStudyTime] = await Promise.all([
+          studyService.getTop5Ranking(groupId),
+          studyService.getUserStudyStatus(groupId, userId),
+          studyService.getGroupMembersStudyTime(groupId, userId),
+        ]);
+
+        // 내 랭킹 / 오늘 공부시간 / 활성 세션 상태 응답
+        socket.emit('study:ranking:update', {
+          groupId,
+          ranking,
+        });
+
+        socket.emit('study:time:update', {
+          groupId,
+          userId,
+          totalMinutes: status.totalMinutes,
+          hasActiveSession: status.hasActiveSession,
+          activeSessionStartedAt: status.activeSessionStartedAt,
+        });
+
+        // 그룹 멤버들의 공부시간 (그룹 챗 탭 및 방 상단 요약용)
+        socket.emit('study:members:time:update', {
+          groupId,
+          members: membersStudyTime,
+        });
+      } catch (error) {
+        logger.error('Error fetching study status', { groupId, userId, error });
+        socket.emit('error', {
+          message: '공부 상태 조회 중 오류가 발생했습니다.',
+        });
+      }
+    });
+
     socket.on('disconnect', () => {
-      console.log('client disconnected', socket.id);
+      logger.info('Socket client disconnected', { socketId: socket.id, userId });
     });
   });
 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useLayoutEffect } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -10,19 +10,32 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router, useNavigation } from 'expo-router';
 
 import { getGroupUrl } from '@/config/api';
 import Input from '@/components/Input';
 import BlockingLoader from '@/components/BlockingLoader';
 import { CreateGroupSchema } from '@/shared/schemas/group';
+import { apiFetch } from '@/utils/apiClient';
+import { IconSymbol } from '@/components/ui/IconSymbol';
+import { colors, Colors } from '@/constants/colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 
 const CreateGroupScreen = () => {
+  const navigation = useNavigation();
+  const colorScheme = useColorScheme() ?? 'light';
+  const isDark = colorScheme === 'dark';
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [nameError, setNameError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Stack 네비게이션 헤더 숨기기
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: false,
+    });
+  }, [navigation]);
 
   const handleCreate = async () => {
     setNameError('');
@@ -43,24 +56,16 @@ const CreateGroupScreen = () => {
 
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem('accessToken');
-      if (!token) {
-        Alert.alert('오류', '로그인이 필요합니다.');
-        router.replace('/(auth)/login');
-        return;
-      }
-
-      const response = await fetch(getGroupUrl('CREATE'), {
+      const data = await apiFetch<{
+        success: boolean;
+        message?: string;
+        data?: { group: { id: string } };
+      }>(getGroupUrl('CREATE'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify(parsed.data),
       });
 
-      const data = await response.json().catch(() => undefined);
-      if (response.ok && data?.success) {
+      if (data.success) {
         Alert.alert('성공', '그룹이 생성되었습니다.', [
           {
             text: '확인',
@@ -68,10 +73,14 @@ const CreateGroupScreen = () => {
           },
         ]);
       } else {
-        Alert.alert('오류', data?.message ?? '그룹 생성 중 오류가 발생했습니다.');
+        Alert.alert('오류', data.message ?? '그룹 생성 중 오류가 발생했습니다.');
       }
-    } catch {
-      Alert.alert('오류', '그룹 생성 중 오류가 발생했습니다.');
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : '그룹 생성 중 오류가 발생했습니다.';
+      if (!errorMessage.includes('인증')) {
+        Alert.alert('오류', errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -79,47 +88,66 @@ const CreateGroupScreen = () => {
 
   return (
     <>
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardView}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <View style={styles.header}>
-              <Text style={styles.title}>새 그룹 만들기</Text>
-            </View>
-
-            <View style={styles.form}>
-              <Input
-                label='그룹명'
-                value={name}
-                onChangeText={setName}
-                placeholder='그룹명을 입력하세요'
-                errorText={nameError}
-                autoCapitalize='none'
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View
+            style={[
+              styles.header,
+              {
+                backgroundColor: isDark ? Colors.dark.background : colors.white,
+                borderBottomColor: isDark ? colors.gray700 : colors.gray200,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <IconSymbol
+                name='arrow-back'
+                size={24}
+                color={isDark ? colors.white : colors.textPrimary}
               />
+            </TouchableOpacity>
+            <Text style={[styles.title, { color: isDark ? colors.white : colors.textPrimary }]}>
+              새 그룹 만들기
+            </Text>
+          </View>
 
-              <Input
-                label='설명 (선택)'
-                value={description}
-                onChangeText={setDescription}
-                placeholder='그룹 설명을 입력하세요'
-                multiline
-                numberOfLines={4}
-                style={styles.descriptionInput}
-              />
+          <View style={styles.form}>
+            <Input
+              label='그룹명'
+              value={name}
+              onChangeText={setName}
+              placeholder='그룹명을 입력하세요'
+              errorText={nameError}
+              autoCapitalize='none'
+            />
 
-              <TouchableOpacity
-                style={[styles.createButton, loading && styles.createButtonDisabled]}
-                onPress={handleCreate}
-                disabled={loading}
-              >
-                <Text style={styles.createButtonText}>그룹 만들기</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+            <Input
+              label='설명 (선택)'
+              value={description}
+              onChangeText={setDescription}
+              placeholder='그룹 설명을 입력하세요'
+              multiline
+              numberOfLines={4}
+              style={styles.descriptionInput}
+            />
+
+            <TouchableOpacity
+              style={[styles.createButton, loading && styles.createButtonDisabled]}
+              onPress={handleCreate}
+              disabled={loading}
+            >
+              <Text style={styles.createButtonText}>그룹 만들기</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
       <BlockingLoader visible={loading} message='그룹 생성 중...' />
     </>
   );
@@ -130,7 +158,6 @@ export default CreateGroupScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
   },
   keyboardView: {
     flex: 1,
@@ -139,17 +166,26 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 24,
+    paddingVertical: 12,
+    minHeight: 48,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    marginRight: 12,
+    padding: 4,
   },
   title: {
-    fontSize: 24,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    flex: 1,
   },
   form: {
     paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 24,
   },
   descriptionInput: {
     minHeight: 100,
@@ -172,4 +208,3 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
-

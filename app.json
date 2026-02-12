@@ -1,22 +1,24 @@
 {
   "expo": {
-    "name": "postpolio",
-    "slug": "postpolio",
+    "name": "딥웰스터디",
+    "slug": "deepwellstudy",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "postpolio",
+    "scheme": "deepwellstudy",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nopaji.deepwellstudy"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.nopaji.deepwellstudy"
     },
     "web": {
       "bundler": "metro",
@@ -33,7 +35,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true

@@ -58,4 +58,3 @@ router.get('/groups/:groupId/messages', async (req: Request, res: Response) => {
 });
 
 export default router;
-

@@ -1,20 +1,21 @@
 import { Tabs } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTranslation } from 'react-i18next';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import TabBarBackground from '@/components/ui/TabBarBackground';
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { getGroupUrl } from '@/config/api';
+import { apiFetch } from '@/utils/apiClient';
+import { useTheme } from '@/contexts/ThemeContext';
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+// 탭 레이아웃 컴포넌트
+const TabLayout = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const { isDark } = useTheme();
   const [hasGroups, setHasGroups] = useState(true); // 기본값은 true (로딩 중에는 표시)
 
   useEffect(() => {
@@ -25,28 +26,17 @@ export default function TabLayout() {
       }
 
       try {
-        const token = await AsyncStorage.getItem('accessToken');
-        if (!token) {
-          setHasGroups(false);
-          return;
-        }
-
-        const response = await fetch(getGroupUrl('LIST'), {
+        const data = await apiFetch<{ data?: { groups?: { id: string }[] } }>(getGroupUrl('LIST'), {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
+          requireAuth: true,
+          // 실제 화면 쪽에서 한 번만 알럿을 띄우기 위해,
+          // 탭 레이아웃에서의 자동 체크는 조용히 처리한다.
+          showAuthErrorAlert: false,
         });
-
-        const data = await response.json().catch(() => undefined);
-        if (response.ok && data?.success) {
-          const groups = data.data?.groups || [];
-          setHasGroups(groups.length > 0);
-        } else {
-          setHasGroups(false);
-        }
+        const groups = data.data?.groups || [];
+        setHasGroups(groups.length > 0);
       } catch {
+        // 인증 실패 시 apiFetch 내부에서 로그인 화면으로 이동 처리
         setHasGroups(false);
       }
     };
@@ -55,54 +45,64 @@ export default function TabLayout() {
   }, [user]);
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
+    <SafeAreaView
+      style={{
+        flex: 1,
+        backgroundColor: isDark ? Colors.dark.background : colors.white,
+      }}
+    >
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+          tabBarActiveTintColor: colors.blue500,
+          tabBarInactiveTintColor: isDark ? colors.gray400 : colors.gray500,
           headerShown: false,
           tabBarButton: HapticTab,
-          tabBarBackground: TabBarBackground,
-          tabBarStyle: Platform.select({
-            ios: {
-              // Use a transparent background on iOS to show the blur effect
-            },
-            default: {},
-          }),
+          // 플랫폼 구분 없이 동일한 탭바 스타일 적용
+          tabBarStyle: {
+            backgroundColor: isDark ? Colors.dark.surface : Colors.light.surface,
+            borderTopColor: isDark ? colors.gray700 : colors.gray200,
+            elevation: 0,
+          },
         }}
       >
         <Tabs.Screen
           name='index'
           options={{
-            title: 'Home',
+            title: t('home.title'),
             tabBarIcon: ({ color }) => <IconSymbol size={28} name='home' color={color} />,
           }}
         />
         <Tabs.Screen
           name='explore'
           options={{
-            title: 'Group',
-            tabBarIcon: ({ color }) => (
-              <IconSymbol size={28} name='send' color={color} />
-            ),
-            href: hasGroups ? undefined : null, // 그룹이 없으면 탭 숨김
+            title: t('groups.title'),
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name='group' color={color} />,
           }}
         />
         <Tabs.Screen
-          name='chat'
+          name='stats'
           options={{
-            title: 'Chat',
-            tabBarIcon: ({ color }) => (
-              <IconSymbol size={28} name='chat' color={color} />
-            ),
+            title: t('stats.title'),
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name='bar-chart' color={color} />,
           }}
         />
         <Tabs.Screen
-          name='groups'
+          name='pomodoro'
           options={{
-            href: null, // 탭에서 숨김
+            title: t('pomodoro.title'),
+            tabBarIcon: ({ color }) => <IconSymbol size={24} name='timer' color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name='grades'
+          options={{
+            title: t('grades.title'),
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name='book' color={color} />,
           }}
         />
       </Tabs>
     </SafeAreaView>
   );
-}
+};
+
+export default TabLayout;

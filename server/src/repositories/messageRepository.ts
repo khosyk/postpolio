@@ -11,11 +11,7 @@ export interface GroupMessage {
 
 class MessageRepository {
   // 메시지 생성
-  async createMessage(
-    groupId: string,
-    userId: string,
-    text: string
-  ): Promise<GroupMessage> {
+  async createMessage(groupId: string, userId: string, text: string): Promise<GroupMessage> {
     try {
       const { data, error } = await supabase
         .from('group_messages')
@@ -43,7 +39,7 @@ class MessageRepository {
   async getGroupMessages(
     groupId: string,
     limit: number = 100,
-    offset: number = 0
+    offset: number = 0,
   ): Promise<GroupMessage[]> {
     try {
       const { data, error } = await supabase
@@ -97,4 +93,3 @@ class MessageRepository {
 }
 
 export default new MessageRepository();
-

@@ -1,11 +1,23 @@
 import groupRepository from '../repositories/groupRepository';
 import userRepository from '../repositories/userRepository';
-import { StudyGroup, CreateGroupRequest, UpdateGroupRequest, GroupWithMembers } from '../types';
+import {
+  StudyGroup,
+  CreateGroupRequest,
+  UpdateGroupRequest,
+  UpdateGroupSettingsRequest,
+  GroupWithMembers,
+} from '../types';
 
 class GroupService {
   // 그룹 생성 + 소유자 자동 추가
   async createGroup(userId: string, groupData: CreateGroupRequest): Promise<StudyGroup> {
     try {
+      // 사용자가 속한 그룹 수 제한 (최대 5개)
+      const existingGroups = await groupRepository.getUserGroups(userId);
+      if (existingGroups.length >= 5) {
+        throw new Error('그룹은 최대 5개까지 생성할 수 있습니다.');
+      }
+
       // 1. 그룹 생성
       const group = await groupRepository.createGroup(userId, groupData);
 
@@ -163,6 +175,32 @@ class GroupService {
       await groupRepository.deleteGroup(groupId);
     } catch (error) {
       console.error('Error deleting group:', error);
+      throw error;
+    }
+  }
+
+  // 그룹 설정 변경 (소유자만)
+  async updateGroupSettings(
+    groupId: string,
+    userId: string,
+    settings: UpdateGroupSettingsRequest
+  ): Promise<StudyGroup> {
+    try {
+      // 1. 그룹 존재 확인
+      const group = await groupRepository.getGroupById(groupId);
+      if (!group) {
+        throw new Error('그룹을 찾을 수 없습니다.');
+      }
+
+      // 2. 소유자인지 확인
+      if (group.owner_id !== userId) {
+        throw new Error('그룹 소유자만 설정을 변경할 수 있습니다.');
+      }
+
+      // 3. 그룹 설정 변경
+      return await groupRepository.updateGroupSettings(groupId, settings);
+    } catch (error) {
+      console.error('Error updating group settings:', error);
       throw error;
     }
   }

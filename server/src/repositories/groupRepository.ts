@@ -1,5 +1,7 @@
 import supabase from '../supabaseClient';
 import { StudyGroup, GroupMember } from '../types';
+import { cacheService, cacheKeys } from '../utils/cache';
+import { logger } from '../utils/logger';
 
 class GroupRepository {
   // 그룹 생성
@@ -15,6 +17,8 @@ class GroupRepository {
             name: groupData.name,
             description: groupData.description || null,
             owner_id: ownerId,
+            chat_enabled: true,
+            check_in_interval: 30,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           },
@@ -30,9 +34,16 @@ class GroupRepository {
     }
   }
 
-  // 그룹 ID로 조회
+  // 그룹 ID로 조회 (캐싱 적용)
   async getGroupById(groupId: string): Promise<StudyGroup | null> {
     try {
+      // 캐시 확인
+      const cached = cacheService.get<StudyGroup>(cacheKeys.group(groupId));
+      if (cached) {
+        logger.debug('Group cache hit', { groupId });
+        return cached;
+      }
+
       const { data, error } = await supabase
         .from('study_groups')
         .select('*')
@@ -40,9 +51,15 @@ class GroupRepository {
         .single();
 
       if (error && error.code !== 'PGRST116') throw error;
+
+      // 캐시 저장 (5분)
+      if (data) {
+        cacheService.set(cacheKeys.group(groupId), data, 300);
+      }
+
       return data;
     } catch (error) {
-      console.error('Error fetching group:', error);
+      logger.error('Error fetching group', { groupId, error });
       throw error;
     }
   }
@@ -172,6 +189,42 @@ class GroupRepository {
       if (error) throw error;
     } catch (error) {
       console.error('Error deleting group:', error);
+      throw error;
+    }
+  }
+
+  // 그룹 설정 변경
+  async updateGroupSettings(
+    groupId: string,
+    settings: { chat_enabled?: boolean; check_in_interval?: number }
+  ): Promise<StudyGroup> {
+    try {
+      const updateData: {
+        chat_enabled?: boolean;
+        check_in_interval?: number;
+        updated_at: string;
+      } = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (settings.chat_enabled !== undefined) {
+        updateData.chat_enabled = settings.chat_enabled;
+      }
+      if (settings.check_in_interval !== undefined) {
+        updateData.check_in_interval = settings.check_in_interval;
+      }
+
+      const { data, error } = await supabase
+        .from('study_groups')
+        .update(updateData)
+        .eq('id', groupId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error updating group settings:', error);
       throw error;
     }
   }

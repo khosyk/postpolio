@@ -8,16 +8,21 @@ interface SkeletonProps {
   style?: ViewStyle;
 }
 
-export const Skeleton = ({ width = '100%', height = 20, borderRadius = 4, style }: SkeletonProps) => {
+export const Skeleton = ({
+  width = '100%',
+  height = 20,
+  borderRadius = 4,
+  style,
+}: SkeletonProps) => {
   return (
     <View
       style={[
         styles.skeleton,
         {
-          width,
+          width: typeof width === 'string' ? width : width,
           height,
           borderRadius,
-        },
+        } as ViewStyle,
         style,
       ]}
     />
@@ -88,4 +93,3 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
 });
-

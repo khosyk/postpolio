@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 
-export default function AuthLayout() {
+// 인증 레이아웃 컴포넌트
+const AuthLayout = () => {
   return (
     <Stack
       screenOptions={{
@@ -14,4 +15,6 @@ export default function AuthLayout() {
       <Stack.Screen name='signup' />
     </Stack>
   );
-}
+};
+
+export default AuthLayout;

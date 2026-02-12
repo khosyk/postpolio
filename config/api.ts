@@ -22,6 +22,7 @@ export const API_CONFIG = {
       SIGNUP: '/api/auth/signup',
       SIGNIN: '/api/auth/signin',
       VERIFY: '/api/auth/verify',
+      REFRESH: '/api/auth/refresh',
       PROFILE: '/api/auth/profile',
       LOGOUT: '/api/auth/logout',
       WITHDRAW: '/api/auth/withdraw',
@@ -32,13 +33,44 @@ export const API_CONFIG = {
       CREATE: '/api/groups',
       DETAIL: (id: string) => `/api/groups/${id}`,
       UPDATE: (id: string) => `/api/groups/${id}`,
+      SETTINGS: (id: string) => `/api/groups/${id}/settings`,
       INVITE: (id: string) => `/api/groups/${id}/invite`,
       LEAVE: (id: string) => `/api/groups/${id}/leave`,
       DELETE: (id: string) => `/api/groups/${id}`,
+      MEMBERS_STUDY_TIME: (id: string) => `/api/groups/${id}/members/study-time`,
     },
     // 메시지 관련
     MESSAGES: {
       LIST: (groupId: string) => `/api/groups/${groupId}/messages`,
+    },
+    // 성적표 관련 (Phase 7)
+    GRADES: {
+      LIST: '/api/grades',
+      CREATE: '/api/grades',
+      DETAIL: (id: string) => `/api/grades/${id}`,
+      UPDATE: (id: string) => `/api/grades/${id}`,
+      DELETE: (id: string) => `/api/grades/${id}`,
+    },
+    // 포모도로 관련 (Phase 8)
+    POMODORO: {
+      SESSIONS: {
+        CREATE: '/api/pomodoro/sessions',
+        LIST: '/api/pomodoro/sessions',
+        COMPLETE: (id: string) => `/api/pomodoro/sessions/${id}/complete`,
+        CANCEL: (id: string) => `/api/pomodoro/sessions/${id}/cancel`,
+      },
+      SETTINGS: {
+        GET: '/api/pomodoro/settings',
+        UPDATE: '/api/pomodoro/settings',
+      },
+    },
+    // 통계 관련 (Phase 9)
+    STATS: {
+      DAILY: (startDate: string, endDate: string) =>
+        `/api/stats/daily?startDate=${startDate}&endDate=${endDate}`,
+      WEEKLY: (week: string) => `/api/stats/weekly?week=${week}`,
+      MONTHLY: (year: number, month: number) => `/api/stats/monthly?year=${year}&month=${month}`,
+      SUMMARY: '/api/stats/summary',
     },
   },
 } as const;
@@ -74,4 +106,18 @@ export const getGroupUrl = (key: keyof typeof API_CONFIG.ENDPOINTS.GROUPS, id?: 
  */
 export const getMessageUrl = (groupId: string): string => {
   return getApiUrl(API_CONFIG.ENDPOINTS.MESSAGES.LIST(groupId));
+};
+
+/**
+ * 통계 API URL 헬퍼
+ */
+export const getStatsUrl = (
+  key: keyof typeof API_CONFIG.ENDPOINTS.STATS,
+  ...args: unknown[]
+): string => {
+  const endpoint = API_CONFIG.ENDPOINTS.STATS[key];
+  if (typeof endpoint === 'function') {
+    return getApiUrl((endpoint as (...args: unknown[]) => string)(...args));
+  }
+  return getApiUrl(endpoint);
 };

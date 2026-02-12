@@ -5,11 +5,7 @@ import { Message } from '../types';
 
 class MessageService {
   // 메시지 생성
-  async createMessage(
-    groupId: string,
-    userId: string,
-    text: string
-  ): Promise<Message> {
+  async createMessage(groupId: string, userId: string, text: string): Promise<Message> {
     try {
       // 1. 그룹 존재 확인
       const group = await groupRepository.getGroupById(groupId);
@@ -53,7 +49,7 @@ class MessageService {
     groupId: string,
     userId: string,
     limit: number = 100,
-    offset: number = 0
+    offset: number = 0,
   ): Promise<Message[]> {
     try {
       // 1. 그룹 존재 확인
@@ -73,12 +69,8 @@ class MessageService {
 
       // 4. 사용자 프로필 조회 (일괄)
       const userIds = [...new Set(dbMessages.map(m => m.user_id))];
-      const profiles = await Promise.all(
-        userIds.map(id => userRepository.getUserProfile(id))
-      );
-      const profileMap = new Map(
-        profiles.filter(p => p !== null).map(p => [p!.user_id, p!])
-      );
+      const profiles = await Promise.all(userIds.map(id => userRepository.getUserProfile(id)));
+      const profileMap = new Map(profiles.filter(p => p !== null).map(p => [p!.user_id, p!]));
 
       // 5. Message 타입으로 변환
       return dbMessages.map(dbMsg => {
@@ -101,4 +93,3 @@ class MessageService {
 }
 
 export default new MessageService();
-

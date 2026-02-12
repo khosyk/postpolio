@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TextInputProps, TouchableOpacity } from 'react-native';
-import { Colors } from '@/constants/Colors';
+import { Colors, colors } from '@/constants/colors';
+import { useColorScheme } from '@/hooks/useColorScheme';
 
 type Props = TextInputProps & {
   label?: string;
@@ -21,32 +22,55 @@ export default function Input({
   ...rest
 }: Props) {
   const [isSecure, setIsSecure] = useState<boolean>(!!secureTextEntry);
+  const colorScheme = useColorScheme() ?? 'light';
+  const isDark = colorScheme === 'dark';
 
   return (
     <View style={styles.wrapper}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? (
+        <Text style={[styles.label, { color: isDark ? colors.white : colors.textPrimary }]}>
+          {label}
+        </Text>
+      ) : null}
       <View
         style={[
           styles.inputRow,
-          errorText ? styles.inputRowError : isSuccess ? styles.inputRowSuccess : undefined,
+          {
+            backgroundColor: isDark ? colors.gray800 : colors.white,
+            borderColor: errorText
+              ? colors.error
+              : isSuccess
+                ? colors.success
+                : isDark
+                  ? colors.gray700
+                  : colors.gray200,
+          },
         ]}
       >
         <TextInput
-          style={[styles.input, style]}
-          placeholderTextColor={Colors.light.tabIconDefault}
+          style={[
+            styles.input,
+            { color: isDark ? colors.white : colors.textPrimary },
+            style,
+          ]}
+          placeholderTextColor={isDark ? colors.gray400 : Colors.light.tabIconDefault}
           secureTextEntry={isSecure}
           {...rest}
         />
         {secureToggle ? (
           <TouchableOpacity accessibilityRole='button' onPress={() => setIsSecure(v => !v)}>
-            <Text style={styles.toggle}>{isSecure ? '보기' : '숨기기'}</Text>
+            <Text style={[styles.toggle, { color: isDark ? colors.blue400 : Colors.light.tint }]}>
+              {isSecure ? '보기' : '숨기기'}
+            </Text>
           </TouchableOpacity>
         ) : null}
       </View>
       {errorText ? (
         <Text style={styles.error}>{errorText}</Text>
       ) : helperText ? (
-        <Text style={styles.helper}>{helperText}</Text>
+        <Text style={[styles.helper, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
+          {helperText}
+        </Text>
       ) : null}
     </View>
   );
@@ -54,25 +78,20 @@ export default function Input({
 
 const styles = StyleSheet.create({
   wrapper: { marginBottom: 16 },
-  label: { fontSize: 14, color: '#374151', marginBottom: 6 },
+  label: { fontSize: 14, marginBottom: 6 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 12,
   },
-  inputRowError: { borderColor: '#DC2626' },
-  inputRowSuccess: { borderColor: '#10B981' },
   input: {
     flex: 1,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
   },
-  toggle: { color: Colors.light.tint, fontSize: 12, paddingHorizontal: 8, paddingVertical: 6 },
-  error: { marginTop: 6, color: '#DC2626', fontSize: 12 },
-  helper: { marginTop: 6, color: '#6B7280', fontSize: 12 },
+  toggle: { fontSize: 12, paddingHorizontal: 8, paddingVertical: 6 },
+  error: { marginTop: 6, color: colors.error, fontSize: 12 },
+  helper: { marginTop: 6, fontSize: 12 },
 });

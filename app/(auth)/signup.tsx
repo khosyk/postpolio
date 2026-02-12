@@ -16,6 +16,8 @@ import { SignUpSchema } from '@shared/schemas/auth';
 import { z } from 'zod';
 import { getAuthUrl } from '@/config/api';
 import BlockingLoader from '@/components/BlockingLoader';
+import { colors, Colors } from '@/constants/colors';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const SignUpScreen = () => {
   const [email, setEmail] = useState('');
@@ -27,6 +29,7 @@ const SignUpScreen = () => {
   const [passwordError, setPasswordError] = useState<string | undefined>(undefined);
   const [confirmError, setConfirmError] = useState<string | undefined>(undefined);
   const [passwordLevel, setPasswordLevel] = useState<1 | 2 | 3>(1);
+  const { isDark } = useTheme();
 
   const stripControlChars = (value: string) =>
     Array.from(value)
@@ -61,7 +64,7 @@ const SignUpScreen = () => {
   };
 
   const onDisplayNameChange = (v: string) => {
-    const next = sanitize(v);
+    const next = sanitize(v).slice(0, 8); // 닉네임 최대 8자
     setDisplayName(next);
   };
 
@@ -143,13 +146,17 @@ const SignUpScreen = () => {
   return (
     <>
       <KeyboardAvoidingView
-        style={styles.container}
+        style={[styles.container, { backgroundColor: isDark ? Colors.dark.background : colors.background }]}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           <View style={styles.header}>
-            <Text style={styles.title}>회원가입</Text>
-            <Text style={styles.subtitle}>새 계정을 만들어보세요</Text>
+            <Text style={[styles.title, { color: isDark ? colors.white : colors.textPrimary }]}>
+              회원가입
+            </Text>
+            <Text style={[styles.subtitle, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
+              새 계정을 만들어보세요
+            </Text>
           </View>
 
           <View style={styles.form}>
@@ -182,9 +189,30 @@ const SignUpScreen = () => {
                 isSuccess={!passwordError && passwordLevel >= 3 && password.length > 0}
               />
               <View style={styles.strengthBars}>
-                <View style={[styles.bar, passwordLevel >= 1 ? styles.barLevel1 : styles.barOff]} />
-                <View style={[styles.bar, passwordLevel >= 2 ? styles.barLevel2 : styles.barOff]} />
-                <View style={[styles.bar, passwordLevel >= 3 ? styles.barLevel3 : styles.barOff]} />
+                <View
+                  style={[
+                    styles.bar,
+                    passwordLevel >= 1
+                      ? styles.barLevel1
+                      : { backgroundColor: isDark ? colors.gray700 : colors.gray200 },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.bar,
+                    passwordLevel >= 2
+                      ? styles.barLevel2
+                      : { backgroundColor: isDark ? colors.gray700 : colors.gray200 },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.bar,
+                    passwordLevel >= 3
+                      ? styles.barLevel3
+                      : { backgroundColor: isDark ? colors.gray700 : colors.gray200 },
+                  ]}
+                />
               </View>
             </View>
 
@@ -228,7 +256,9 @@ const SignUpScreen = () => {
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>이미 계정이 있으신가요?</Text>
+            <Text style={[styles.footerText, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
+              이미 계정이 있으신가요?
+            </Text>
             <TouchableOpacity onPress={() => router.back()}>
               <Text style={styles.loginLink}>로그인</Text>
             </TouchableOpacity>
@@ -246,7 +276,6 @@ export default SignUpScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
   },
   scrollContainer: {
     flexGrow: 1,
@@ -260,12 +289,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#2C3E50',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#7F8C8D',
     textAlign: 'center',
   },
   form: {
@@ -277,7 +304,6 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#2C3E50',
     marginBottom: 8,
   },
   signUpButton: {
@@ -301,7 +327,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   footerText: {
-    color: '#7F8C8D',
     fontSize: 14,
   },
   loginLink: {
@@ -320,7 +345,9 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 2,
   },
-  barOff: { backgroundColor: '#E5E7EB' },
+  barOff: {
+    // backgroundColor는 동적으로 설정
+  },
   barLevel1: { backgroundColor: '#DC2626' }, // red
   barLevel2: { backgroundColor: '#F59E0B' }, // yellow
   barLevel3: { backgroundColor: '#10B981' }, // green

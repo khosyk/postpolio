@@ -16,6 +16,28 @@ class AuthService {
     if (password.length < 8) throw new Error('password must be at least 8 chars');
 
     try {
+      // 닉네임 후보 생성 (이메일 앞부분 또는 displayName)
+      const baseNickname =
+        (userData.displayName || (email.includes('@') ? email.split('@')[0] : '') || 'user')
+          .slice(0, 16);
+
+      // 닉네임 중복 체크 및 가용한 닉네임 찾기
+      let finalNickname: string = baseNickname;
+      let suffix = 1;
+      // 최대 20회 정도 시도 (user, user1, user2, ...)
+      // 완전한 레이스 컨디션 방지는 DB 유니크 인덱스에서 보완
+      // 여기서는 UX 차원의 선제 체크만 수행
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const existing = await userRepository.getUserByNickname(finalNickname);
+        if (!existing) break;
+        suffix += 1;
+        finalNickname = `${baseNickname}${suffix}`;
+        if (suffix > 20) {
+          throw new Error('닉네임이 이미 사용 중입니다. 다른 닉네임을 입력해주세요.');
+        }
+      }
+
       // 1. Supabase Auth로 계정 생성
       // emailRedirectTo: 이메일 인증 링크 클릭 시 리다이렉트될 URL
       // React Native 앱의 경우 딥링크 또는 웹 페이지로 설정
@@ -28,7 +50,7 @@ class AuthService {
         options: {
           emailRedirectTo,
           data: {
-            nickname: userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
+            nickname: finalNickname,
             avatar: userData.avatar || '👤',
           },
         },
@@ -42,7 +64,7 @@ class AuthService {
       if (authData.user) {
         const profileData = {
           email,
-          nickname: userData.displayName || (email.includes('@') ? email.split('@')[0] : 'user'),
+          nickname: finalNickname,
           avatar: userData.avatar || '👤',
         };
 
@@ -56,6 +78,7 @@ class AuthService {
           },
           profile,
           accessToken: authData.session?.access_token ?? undefined,
+          refreshToken: authData.session?.refresh_token ?? undefined,
         };
       }
 
@@ -93,6 +116,7 @@ class AuthService {
         },
         profile,
         accessToken: data.session?.access_token ?? undefined,
+        refreshToken: data.session?.refresh_token ?? undefined,
       };
     } catch (error) {
       console.error('Sign in error:', error);
@@ -130,9 +154,41 @@ class AuthService {
   // 사용자 프로필 업데이트
   async updateProfile(userId: string, updateData: Partial<UserProfile>): Promise<UserProfile> {
     try {
+      // 닉네임 변경 요청 시 중복 체크
+      if (updateData.nickname) {
+        const existing = await userRepository.getUserByNickname(updateData.nickname);
+        if (existing && existing.user_id !== userId) {
+          throw new Error('이미 사용 중인 닉네임입니다.');
+        }
+      }
+
       return await userRepository.updateUserProfile(userId, updateData);
     } catch (error) {
       console.error('Update profile error:', error);
+      throw error;
+    }
+  }
+
+  // Refresh Token으로 Access Token 갱신
+  async refreshAccessToken(
+    refreshToken: string
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    if (!refreshToken || typeof refreshToken !== 'string')
+      throw new Error('refreshToken is required');
+    try {
+      const { data, error } = await supabase.auth.refreshSession({
+        refresh_token: refreshToken,
+      });
+
+      if (error) throw error;
+      if (!data || !data.session) throw new Error('Failed to refresh session');
+
+      return {
+        accessToken: data.session.access_token,
+        refreshToken: data.session.refresh_token,
+      };
+    } catch (error) {
+      console.error('Refresh token error:', error);
       throw error;
     }
   }

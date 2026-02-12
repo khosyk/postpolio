@@ -2,22 +2,27 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getAuthUrl } from '@/config/api';
+import { storageKeys } from '@/constants/storage';
 
 interface User {
   id: string;
   email: string;
+  nickname?: string;
+  avatar?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (user: User, token: string) => Promise<void>;
+  login: (user: User, token: string, refreshToken?: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (updates: Partial<User>) => void;
 }
 
 interface VerifyResponseUser {
   id: string;
   email: string | null;
+  nickname?: string | null;
 }
 
 interface VerifyResponse {
@@ -40,7 +45,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const checkAuthState = async () => {
     try {
       const storedUser = await AsyncStorage.getItem('user');
-      const storedToken = await AsyncStorage.getItem('accessToken');
+      const storedToken = await AsyncStorage.getItem(storageKeys.auth.accessToken);
+      const storedRefreshToken = await AsyncStorage.getItem(storageKeys.auth.refreshToken);
 
       if (!storedUser || !storedToken) {
         setUser(null);
@@ -59,9 +65,42 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (!response.ok) {
-        // 토큰이 만료되었거나 유효하지 않으면 로그인 상태 초기화
+        // 토큰이 만료되었으면 refresh token으로 갱신 시도
+        if (storedRefreshToken) {
+          try {
+            const refreshResponse = await fetch(getAuthUrl('REFRESH'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ refreshToken: storedRefreshToken }),
+            });
+
+            if (refreshResponse.ok) {
+              const refreshData = (await refreshResponse.json()) as {
+                success: boolean;
+                data?: { accessToken: string; refreshToken: string };
+              };
+
+              if (refreshData.success && refreshData.data) {
+                // 새 토큰 저장
+                await AsyncStorage.setItem(storageKeys.auth.accessToken, refreshData.data.accessToken);
+                await AsyncStorage.setItem(storageKeys.auth.refreshToken, refreshData.data.refreshToken);
+
+                // 사용자 정보 유지
+                setUser(parsedUser);
+                return;
+              }
+            }
+          } catch {
+            // Refresh 실패는 아래에서 처리
+          }
+        }
+
+        // Refresh token이 없거나 갱신 실패 시 로그인 상태 초기화
         await AsyncStorage.removeItem('user');
-        await AsyncStorage.removeItem('accessToken');
+        await AsyncStorage.removeItem(storageKeys.auth.accessToken);
+        await AsyncStorage.removeItem(storageKeys.auth.refreshToken);
         setUser(null);
         return;
       }
@@ -70,7 +109,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (!data.success || !data.data?.user?.id) {
         await AsyncStorage.removeItem('user');
-        await AsyncStorage.removeItem('accessToken');
+        await AsyncStorage.removeItem(storageKeys.auth.accessToken);
+        await AsyncStorage.removeItem(storageKeys.auth.refreshToken);
         setUser(null);
         return;
       }
@@ -80,21 +120,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser({
         id: verifiedUser.id,
         email: verifiedUser.email ?? parsedUser.email,
+        nickname: verifiedUser.nickname ?? parsedUser.nickname,
       });
     } catch {
       // 자동 로그인 체크 실패 시 조용히 세션만 초기화
       setUser(null);
       await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('accessToken');
+      await AsyncStorage.removeItem(storageKeys.auth.accessToken);
+      await AsyncStorage.removeItem(storageKeys.auth.refreshToken);
     } finally {
       setLoading(false);
     }
   };
 
-  const login = async (userData: User, token: string) => {
+  const login = async (userData: User, token: string, refreshToken?: string) => {
     try {
       await AsyncStorage.setItem('user', JSON.stringify(userData));
-      await AsyncStorage.setItem('accessToken', token);
+      await AsyncStorage.setItem(storageKeys.auth.accessToken, token);
+      if (refreshToken) {
+        await AsyncStorage.setItem(storageKeys.auth.refreshToken, refreshToken);
+      }
       setUser(userData);
     } catch {
       // 로그인 정보 저장 실패 시 콘솔에만 남기고 무시
@@ -117,15 +162,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('accessToken');
+      await AsyncStorage.removeItem(storageKeys.auth.accessToken);
+      await AsyncStorage.removeItem(storageKeys.auth.refreshToken);
       setUser(null);
     } catch {
       // 클라이언트 세션 정리 실패 시에도 앱이 크래시 되지 않도록 방어
     }
   };
 
+  const updateUser = (updates: Partial<User>) => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, ...updates };
+      void AsyncStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>
+      {children}
+    </AuthContext.Provider>
   );
 };
 
