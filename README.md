@@ -407,7 +407,7 @@ cd server && yarn dev
 프로젝트를 처음 시작하는 경우:
 
 1. **저장소 클론**
-   ```bash
+```bash
    git clone <repository-url>
    cd postpolio
    ```
@@ -557,6 +557,32 @@ const MyComponent = () => {
 ```
 
 ### 주요 컴포넌트
+
+#### AppModal (표준 모달)
+
+**용도**: 앱 전반에서 동일한 형태의 모달을 사용하기 위한 공통 컴포넌트.
+
+**규격**:
+- 반투명 백드롭(`dimBg`), 중앙 카드(너비 90%, 최대 400px, `borderRadius` 16, 패딩 24)
+- 제목(필수), 부제목(선택), 본문(children)
+- 테마 색상 자동 적용(`useTheme` + `getThemeColors`)
+
+**사용**:
+```typescript
+import AppModal from '@/components/AppModal';
+
+<AppModal
+  visible={visible}
+  onRequestClose={() => setVisible(false)}
+  title="제목"
+  subtitle="부제목 (선택)"
+  animationType="fade"
+>
+  {/* 폼, 버튼, 메뉴 목록 등 */}
+</AppModal>
+```
+
+**규칙**: 새로 만드는 모달(메뉴, 설정, 확인 등)은 가능한 한 `AppModal`을 사용하고, 테마 색상(`themeColors`)을 적용한다. 바텀 시트/풀스크린 피커 등 특수 형태는 기존 `DatePickerModal`처럼 별도 구현 가능.
 
 #### RadarChart (방사형 그래프)
 
@@ -1313,6 +1339,7 @@ AsyncStorage (세션 정보 공유)
 
 ### 공통 컴포넌트
 
+- **모달**: `components/AppModal.tsx` (표준 모달, 테마 적용)
 - **차트**: `components/RadarChart.tsx`, `components/LineChart.tsx`
 - **랭킹**: `components/RankingChip.tsx`
 - **타이머**: `components/TimerGauge.tsx`, `components/CircularProgress.tsx`

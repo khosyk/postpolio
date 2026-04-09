@@ -1,14 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -22,6 +13,7 @@ import { Skeleton, SkeletonChip } from '@/components/Skeleton';
 import { apiFetch, AuthError } from '@/utils/apiClient';
 import { colors, Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AppModal from '@/components/AppModal';
 
 const FAVORITES_STORAGE_KEY = 'group_favorites';
 
@@ -37,6 +29,15 @@ const HomeScreen = () => {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [upcomingExam, setUpcomingExam] = useState<ExamWithGrades | null>(null);
   const [loadingGrades, setLoadingGrades] = useState(false);
+  const [withdrawConfirmVisible, setWithdrawConfirmVisible] = useState(false);
+  const [withdrawResultModal, setWithdrawResultModal] = useState<{
+    visible: boolean;
+    isError?: boolean;
+    message: string;
+  }>({
+    visible: false,
+    message: '',
+  });
 
   const baseNickname = user?.nickname || (user?.email && user.email.split('@')[0]) || '게스트';
   const nickname = baseNickname.length > 8 ? baseNickname.slice(0, 8) : baseNickname;
@@ -218,44 +219,46 @@ const HomeScreen = () => {
   };
 
   const handleWithdraw = () => {
-    Alert.alert('회원탈퇴', '정말 회원탈퇴 하시겠습니까?\n이 작업은 되돌릴 수 없습니다.', [
-      {
-        text: '취소',
-        style: 'cancel',
-      },
-      {
-        text: '회원탈퇴',
-        style: 'destructive',
-        onPress: async () => {
-          setMenuVisible(false);
-          try {
-            setWithdrawing(true);
-            const data = await apiFetch<{ success?: boolean; message?: string }>(
-              getAuthUrl('WITHDRAW'),
-              {
-                method: 'DELETE',
-                requireAuth: true,
-              }
-            );
+    setWithdrawConfirmVisible(true);
+  };
 
-            if (!data?.success) {
-              Alert.alert('오류', data?.message ?? '회원탈퇴 중 오류가 발생했습니다.');
-              return;
-            }
+  const handleConfirmWithdraw = async () => {
+    setWithdrawConfirmVisible(false);
+    setMenuVisible(false);
+    try {
+      setWithdrawing(true);
+      const data = await apiFetch<{ success?: boolean; message?: string }>(getAuthUrl('WITHDRAW'), {
+        method: 'DELETE',
+        requireAuth: true,
+      });
 
-            Alert.alert('완료', '회원탈퇴가 완료되었습니다.');
-            await logout();
-            router.replace('/(auth)/login');
-          } catch (e) {
-            if (!(e instanceof AuthError)) {
-              Alert.alert('오류', '회원탈퇴 중 오류가 발생했습니다.');
-            }
-          } finally {
-            setWithdrawing(false);
-          }
-        },
-      },
-    ]);
+      if (!data?.success) {
+        setWithdrawResultModal({
+          visible: true,
+          isError: true,
+          message: data?.message ?? '회원탈퇴 중 오류가 발생했습니다.',
+        });
+        return;
+      }
+
+      setWithdrawResultModal({
+        visible: true,
+        isError: false,
+        message: '회원탈퇴가 완료되었습니다.',
+      });
+      await logout();
+      router.replace('/(auth)/login');
+    } catch (e) {
+      if (!(e instanceof AuthError)) {
+        setWithdrawResultModal({
+          visible: true,
+          isError: true,
+          message: '회원탈퇴 중 오류가 발생했습니다.',
+        });
+      }
+    } finally {
+      setWithdrawing(false);
+    }
   };
 
   return (
@@ -525,6 +528,44 @@ const HomeScreen = () => {
         )}
       </View>
       </ScrollView>
+
+      {/* 회원탈퇴 확인 모달 */}
+      <AppModal
+        visible={withdrawConfirmVisible}
+        onRequestClose={() => setWithdrawConfirmVisible(false)}
+        title='회원탈퇴'
+        subtitle='정말 회원탈퇴 하시겠습니까? 이 작업은 되돌릴 수 없습니다.'
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='회원탈퇴'
+        cancelText='취소'
+        confirmVariant='danger'
+        onConfirm={handleConfirmWithdraw}
+        onCancel={() => setWithdrawConfirmVisible(false)}
+      />
+
+      {/* 회원탈퇴 결과 모달 */}
+      <AppModal
+        visible={withdrawResultModal.visible}
+        onRequestClose={() =>
+          setWithdrawResultModal(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+        title={withdrawResultModal.isError ? '오류' : '완료'}
+        subtitle={withdrawResultModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={withdrawResultModal.isError ? 'danger' : 'primary'}
+        onConfirm={() =>
+          setWithdrawResultModal(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+      />
 
       {/* 프로필 메뉴 모달 */}
       <Modal

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,6 +17,7 @@ import { getAuthUrl } from '@/config/api';
 import BlockingLoader from '@/components/BlockingLoader';
 import { colors, Colors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
+import AppModal from '@/components/AppModal';
 
 const SignUpScreen = () => {
   const [email, setEmail] = useState('');
@@ -30,6 +30,33 @@ const SignUpScreen = () => {
   const [confirmError, setConfirmError] = useState<string | undefined>(undefined);
   const [passwordLevel, setPasswordLevel] = useState<1 | 2 | 3>(1);
   const { isDark } = useTheme();
+  const [modalState, setModalState] = useState<{
+    visible: boolean;
+    title: string;
+    subtitle?: string;
+    isError?: boolean;
+  }>({
+    visible: false,
+    title: '',
+  });
+
+  const showErrorModal = (message: string, title = '오류') => {
+    setModalState({
+      visible: true,
+      title,
+      subtitle: message,
+      isError: true,
+    });
+  };
+
+  const showInfoModal = (title: string, subtitle?: string) => {
+    setModalState({
+      visible: true,
+      title,
+      subtitle,
+      isError: false,
+    });
+  };
 
   const stripControlChars = (value: string) =>
     Array.from(value)
@@ -88,12 +115,12 @@ const SignUpScreen = () => {
 
   const handleSignUp = async () => {
     if (!email || !password || !confirmPassword) {
-      Alert.alert('오류', '모든 필드를 입력해주세요.');
+      showErrorModal('모든 필드를 입력해주세요.');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('오류', '비밀번호가 일치하지 않습니다.');
+      showErrorModal('비밀번호가 일치하지 않습니다.');
       return;
     }
 
@@ -109,7 +136,7 @@ const SignUpScreen = () => {
       const first = parsed.error.issues[0];
       if (first.path[0] === 'email') setEmailError(first.message);
       if (first.path[0] === 'password') setPasswordError(first.message);
-      Alert.alert('오류', first.message);
+      showErrorModal(first.message);
       return;
     }
 
@@ -131,13 +158,13 @@ const SignUpScreen = () => {
       const data = await response.json();
 
       if (data.success) {
-        Alert.alert('성공', '회원가입이 완료되었습니다. 로그인해주세요.');
+        showInfoModal('회원가입이 완료되었습니다.', '로그인해주세요.');
         router.back();
       } else {
-        Alert.alert('오류', data.message);
+        showErrorModal(data.message || '회원가입 중 오류가 발생했습니다.');
       }
     } catch {
-      Alert.alert('오류', '회원가입 중 오류가 발생했습니다.');
+      showErrorModal('회원가입 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -267,6 +294,27 @@ const SignUpScreen = () => {
       </KeyboardAvoidingView>
       {/* API 요청 동안 전체 화면을 막는 로딩 오버레이 (boolean으로 제어) */}
       <BlockingLoader visible={loading} message='회원가입 중입니다...' />
+      <AppModal
+        visible={modalState.visible}
+        onRequestClose={() =>
+          setModalState(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+        title={modalState.title}
+        subtitle={modalState.subtitle}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={modalState.isError ? 'danger' : 'primary'}
+        onConfirm={() =>
+          setModalState(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+      />
     </>
   );
 };

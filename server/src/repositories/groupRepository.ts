@@ -174,6 +174,11 @@ class GroupRepository {
         .single();
 
       if (error) throw error;
+
+      // 캐시 무효화 및 갱신
+      cacheService.del(cacheKeys.group(groupId));
+      cacheService.set(cacheKeys.group(groupId), data, 300);
+
       return data;
     } catch (error) {
       console.error('Error updating group:', error);
@@ -187,6 +192,9 @@ class GroupRepository {
       const { error } = await supabase.from('study_groups').delete().eq('id', groupId);
 
       if (error) throw error;
+
+      // 캐시 무효화
+      cacheService.del(cacheKeys.group(groupId));
     } catch (error) {
       console.error('Error deleting group:', error);
       throw error;
@@ -222,6 +230,11 @@ class GroupRepository {
         .single();
 
       if (error) throw error;
+
+      // 캐시 무효화 및 갱신
+      cacheService.del(cacheKeys.group(groupId));
+      cacheService.set(cacheKeys.group(groupId), data, 300);
+
       return data;
     } catch (error) {
       console.error('Error updating group settings:', error);

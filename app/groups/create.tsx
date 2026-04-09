@@ -1,6 +1,5 @@
 import React, { useState, useLayoutEffect } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -20,6 +19,7 @@ import { apiFetch } from '@/utils/apiClient';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { colors, Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AppModal from '@/components/AppModal';
 
 const CreateGroupScreen = () => {
   const navigation = useNavigation();
@@ -29,6 +29,42 @@ const CreateGroupScreen = () => {
   const [description, setDescription] = useState('');
   const [nameError, setNameError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [modalState, setModalState] = useState<{
+    visible: boolean;
+    title: string;
+    subtitle?: string;
+    isError?: boolean;
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+  });
+
+  const closeModal = () =>
+    setModalState(prev => ({
+      ...prev,
+      visible: false,
+      onConfirm: undefined,
+    }));
+
+  const showErrorModal = (message: string, title = '오류') => {
+    setModalState({
+      visible: true,
+      title,
+      subtitle: message,
+      isError: true,
+    });
+  };
+
+  const showInfoModal = (title: string, subtitle?: string, onConfirm?: () => void) => {
+    setModalState({
+      visible: true,
+      title,
+      subtitle,
+      isError: false,
+      onConfirm,
+    });
+  };
 
   // Stack 네비게이션 헤더 숨기기
   useLayoutEffect(() => {
@@ -50,7 +86,7 @@ const CreateGroupScreen = () => {
       if (first.path[0] === 'name') {
         setNameError(first.message);
       }
-      Alert.alert('오류', first.message);
+      showErrorModal(first.message);
       return;
     }
 
@@ -66,20 +102,15 @@ const CreateGroupScreen = () => {
       });
 
       if (data.success) {
-        Alert.alert('성공', '그룹이 생성되었습니다.', [
-          {
-            text: '확인',
-            onPress: () => router.back(),
-          },
-        ]);
+        showInfoModal('그룹이 생성되었습니다.', undefined, () => router.back());
       } else {
-        Alert.alert('오류', data.message ?? '그룹 생성 중 오류가 발생했습니다.');
+        showErrorModal(data.message ?? '그룹 생성 중 오류가 발생했습니다.');
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : '그룹 생성 중 오류가 발생했습니다.';
       if (!errorMessage.includes('인증')) {
-        Alert.alert('오류', errorMessage);
+        showErrorModal(errorMessage);
       }
     } finally {
       setLoading(false);
@@ -149,6 +180,22 @@ const CreateGroupScreen = () => {
         </ScrollView>
       </KeyboardAvoidingView>
       <BlockingLoader visible={loading} message='그룹 생성 중...' />
+      <AppModal
+        visible={modalState.visible}
+        onRequestClose={closeModal}
+        title={modalState.title}
+        subtitle={modalState.subtitle}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={modalState.isError ? 'danger' : 'primary'}
+        onConfirm={() => {
+          if (modalState.onConfirm) {
+            modalState.onConfirm();
+          }
+          closeModal();
+        }}
+      />
     </>
   );
 };

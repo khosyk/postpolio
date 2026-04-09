@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useLayoutEffect } from 'react';
 import {
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -14,6 +13,7 @@ import {
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { getApiUrl } from '@/config/api';
 import BlockingLoader from '@/components/BlockingLoader';
+import AppModal from '@/components/AppModal';
 import { ExamWithGrades } from '@/types/grade';
 import { apiFetch, AuthError } from '@/utils/apiClient';
 import { colors, Colors } from '@/constants/colors';
@@ -57,6 +57,49 @@ const ExamSubjectsScreen = () => {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
   const [deletingExam, setDeletingExam] = useState(false);
+  const [deleteExamModalVisible, setDeleteExamModalVisible] = useState(false);
+  const [deleteGradeModalVisible, setDeleteGradeModalVisible] = useState(false);
+  const [gradeDeleteTarget, setGradeDeleteTarget] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [alertModal, setAlertModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    variant?: 'primary' | 'danger';
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'primary',
+  });
+
+  const closeAlertModal = () =>
+    setAlertModal(prev => ({
+      ...prev,
+      visible: false,
+      onConfirm: undefined,
+    }));
+
+  const showError = (message: string, title = '오류') => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'danger',
+    });
+  };
+
+  const showInfo = (title: string, message: string, onConfirm?: () => void) => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'primary',
+      onConfirm,
+    });
+  };
 
   const fetchExam = useCallback(async () => {
     if (!examId) return;
@@ -78,7 +121,7 @@ const ExamSubjectsScreen = () => {
         };
         setExam(examData);
       } else {
-        Alert.alert('오류', '시험 정보를 불러올 수 없습니다.');
+        showError('시험 정보를 불러올 수 없습니다.');
         router.back();
       }
     } catch (e) {
@@ -86,7 +129,7 @@ const ExamSubjectsScreen = () => {
       console.error('Error fetching exam:', e);
       if (!(e instanceof AuthError)) {
         const errorMessage = (e as Error).message || '시험 정보를 불러오는 중 오류가 발생했습니다.';
-        Alert.alert('오류', errorMessage);
+        showError(errorMessage);
       }
       router.back();
     } finally {
@@ -109,7 +152,7 @@ const ExamSubjectsScreen = () => {
     const parsedCurrentScore = currentScore ? Number(currentScore) : undefined;
 
     if (parsedMaxScore < 1 || parsedMaxScore > 10000) {
-      Alert.alert('오류', '최고 점수는 1 이상 10000 이하여야 합니다.');
+      showError('최고 점수는 1 이상 10000 이하여야 합니다.');
       return;
     }
 
@@ -117,14 +160,14 @@ const ExamSubjectsScreen = () => {
       parsedTargetScore !== undefined &&
       (parsedTargetScore < 0 || parsedTargetScore > parsedMaxScore)
     ) {
-      Alert.alert('오류', `목표 점수는 0 이상 ${parsedMaxScore} 이하여야 합니다.`);
+      showError(`목표 점수는 0 이상 ${parsedMaxScore} 이하여야 합니다.`);
       return;
     }
     if (
       parsedCurrentScore !== undefined &&
       (parsedCurrentScore < 0 || parsedCurrentScore > parsedMaxScore)
     ) {
-      Alert.alert('오류', `현재 점수는 0 이상 ${parsedMaxScore} 이하여야 합니다.`);
+      showError(`현재 점수는 0 이상 ${parsedMaxScore} 이하여야 합니다.`);
       return;
     }
 
@@ -141,7 +184,7 @@ const ExamSubjectsScreen = () => {
       if (first.path[0] === 'subject_name') {
         setSubjectError(first.message);
       }
-      Alert.alert('오류', first.message);
+      showError(first.message);
       return;
     }
 
@@ -172,10 +215,10 @@ const ExamSubjectsScreen = () => {
         setCurrentScore('');
         setShowAddModal(false);
       } else {
-        Alert.alert('오류', data?.message ?? '과목 추가 중 오류가 발생했습니다.');
+        showError(data?.message ?? '과목 추가 중 오류가 발생했습니다.');
       }
     } catch (e) {
-      Alert.alert('오류', (e as Error).message ?? '과목 추가 중 오류가 발생했습니다.');
+      showError((e as Error).message ?? '과목 추가 중 오류가 발생했습니다.');
     } finally {
       setAddingSubject(false);
     }
@@ -234,7 +277,7 @@ const ExamSubjectsScreen = () => {
       // 최고점 검증 (1 ~ 1000)
       if (maxScoreValue) {
         if (isNaN(newMaxScore) || newMaxScore < 1 || newMaxScore > 1000) {
-          Alert.alert('오류', '최고 점수는 1 이상 1000 이하여야 합니다.');
+          showError('최고 점수는 1 이상 1000 이하여야 합니다.');
           return;
         }
       }
@@ -243,15 +286,15 @@ const ExamSubjectsScreen = () => {
       let validTargetScore = grade?.target_score ?? 0;
       if (targetScoreValue !== undefined && targetScoreValue !== '') {
         if (isNaN(targetNumValueRaw) || targetNumValueRaw < 0) {
-          Alert.alert('오류', '목표 점수는 0 이상이어야 합니다.');
+          showError('목표 점수는 0 이상이어야 합니다.');
           return;
         }
         if (targetNumValueRaw > newMaxScore) {
-          Alert.alert('오류', `목표 점수는 최고 점수(${newMaxScore}점) 이하여야 합니다.`);
+          showError(`목표 점수는 최고 점수(${newMaxScore}점) 이하여야 합니다.`);
           return;
         }
         if (targetNumValueRaw > 1000) {
-          Alert.alert('오류', '목표 점수는 1000 이하여야 합니다.');
+          showError('목표 점수는 1000 이하여야 합니다.');
           return;
         }
         validTargetScore = targetNumValueRaw;
@@ -260,11 +303,11 @@ const ExamSubjectsScreen = () => {
       // 현재 점수 검증 (0 ~ newMaxScore)
       if (numValue !== null) {
         if (numValue < 0) {
-          Alert.alert('오류', '현재 점수는 0 이상이어야 합니다.');
+          showError('현재 점수는 0 이상이어야 합니다.');
           return;
         }
         if (numValue > newMaxScore) {
-          Alert.alert('오류', `현재 점수는 최고 점수(${newMaxScore}점)를 넘을 수 없습니다.`);
+          showError(`현재 점수는 최고 점수(${newMaxScore}점)를 넘을 수 없습니다.`);
           return;
         }
       }
@@ -272,11 +315,11 @@ const ExamSubjectsScreen = () => {
       // 과목명 검증
       const trimmedName = (subjectNameValue ?? grade?.subject_name ?? '').trim();
       if (!trimmedName) {
-        Alert.alert('오류', '과목명을 입력해주세요.');
+        showError('과목명을 입력해주세요.');
         return;
       }
       if (trimmedName.length > 50) {
-        Alert.alert('오류', '과목명은 최대 50자까지 가능합니다.');
+        showError('과목명은 최대 50자까지 가능합니다.');
         return;
       }
 
@@ -356,10 +399,10 @@ const ExamSubjectsScreen = () => {
             };
           });
         } else {
-          Alert.alert('오류', data?.message ?? '점수 업데이트 중 오류가 발생했습니다.');
+          showError(data?.message ?? '점수 업데이트 중 오류가 발생했습니다.');
         }
       } catch (e) {
-        Alert.alert('오류', (e as Error).message ?? '점수 업데이트 중 오류가 발생했습니다.');
+        showError((e as Error).message ?? '점수 업데이트 중 오류가 발생했습니다.');
       } finally {
         setUpdatingScores(prev => ({ ...prev, [gradeId]: false }));
       }
@@ -367,89 +410,83 @@ const ExamSubjectsScreen = () => {
     [exam?.grades],
   );
 
-  // 과목 삭제
-  const handleDeleteGrade = useCallback(async (gradeId: string, subjectName: string) => {
-    Alert.alert('삭제 확인', `${subjectName} 과목을 삭제하시겠습니까?`, [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: async () => {
-          setDeletingIds(prev => new Set(prev).add(gradeId));
-          try {
-            const data = await apiFetch<{ success?: boolean; message?: string }>(
-              getApiUrl(`/api/grades/${gradeId}`),
-              {
-                method: 'DELETE',
-                requireAuth: true,
-              },
-            );
-
-            if (data?.success) {
-              // 로컬 상태만 업데이트 (전체 리렌더링 방지)
-              setExam(prev => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  grades: prev.grades.filter(grade => grade.id !== gradeId),
-                };
-              });
-            } else {
-              Alert.alert('오류', data?.message ?? '과목 삭제 중 오류가 발생했습니다.');
-            }
-          } catch (e) {
-            Alert.alert('오류', (e as Error).message ?? '과목 삭제 중 오류가 발생했습니다.');
-          } finally {
-            setDeletingIds(prev => {
-              const next = new Set(prev);
-              next.delete(gradeId);
-              return next;
-            });
-          }
-        },
-      },
-    ]);
+  // 과목 삭제 확인 모달 열기
+  const handleDeleteGrade = useCallback((gradeId: string, subjectName: string) => {
+    setGradeDeleteTarget({ id: gradeId, name: subjectName });
+    setDeleteGradeModalVisible(true);
   }, []);
 
-  // 시험 삭제
+  // 과목 실제 삭제 처리
+  const confirmDeleteGrade = useCallback(async () => {
+    if (!gradeDeleteTarget) return;
+    const { id: gradeId } = gradeDeleteTarget;
+
+    setDeletingIds(prev => new Set(prev).add(gradeId));
+    try {
+      const data = await apiFetch<{ success?: boolean; message?: string }>(
+        getApiUrl(`/api/grades/${gradeId}`),
+        {
+          method: 'DELETE',
+          requireAuth: true,
+        },
+      );
+
+      if (data?.success) {
+        // 로컬 상태만 업데이트 (전체 리렌더링 방지)
+        setExam(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            grades: prev.grades.filter(grade => grade.id !== gradeId),
+          };
+        });
+        setDeleteGradeModalVisible(false);
+        setGradeDeleteTarget(null);
+      } else {
+        showError(data?.message ?? '과목 삭제 중 오류가 발생했습니다.');
+      }
+    } catch (e) {
+      showError((e as Error).message ?? '과목 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(gradeId);
+        return next;
+      });
+    }
+  }, [gradeDeleteTarget]);
+
+  // 시험 삭제 확인 모달 열기
   const handleDeleteExam = useCallback(() => {
     if (!examId || !exam) return;
-
-    Alert.alert('시험 삭제', '이 시험과 모든 과목을 삭제하시겠습니까?', [
-      { text: '취소', style: 'cancel' },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: async () => {
-          setDeletingExam(true);
-          try {
-            const data = await apiFetch<{ success?: boolean; message?: string }>(
-              getApiUrl(`/api/grades/exams/${examId}`),
-              {
-                method: 'DELETE',
-                requireAuth: true,
-              },
-            );
-
-            if (data?.success) {
-              Alert.alert('완료', '시험이 삭제되었습니다.', [
-                {
-                  text: '확인',
-                  onPress: () => router.back(),
-                },
-              ]);
-            } else {
-              Alert.alert('오류', data?.message ?? '시험 삭제 중 오류가 발생했습니다.');
-            }
-          } catch (e) {
-            Alert.alert('오류', (e as Error).message ?? '시험 삭제 중 오류가 발생했습니다.');
-          } finally {
-            setDeletingExam(false);
-          }
-        },
-      },
-    ]);
+    setDeleteExamModalVisible(true);
   }, [examId, exam]);
+
+  // 시험 실제 삭제 처리
+  const confirmDeleteExam = useCallback(async () => {
+    if (!examId) return;
+    setDeletingExam(true);
+    try {
+      const data = await apiFetch<{ success?: boolean; message?: string }>(
+        getApiUrl(`/api/grades/exams/${examId}`),
+        {
+          method: 'DELETE',
+          requireAuth: true,
+        },
+      );
+
+      if (data?.success) {
+        setDeleteExamModalVisible(false);
+        showInfo('완료', '시험이 삭제되었습니다.', () => router.back());
+      } else {
+        showError(data?.message ?? '시험 삭제 중 오류가 발생했습니다.');
+      }
+    } catch (e) {
+      showError((e as Error).message ?? '시험 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setDeletingExam(false);
+    }
+  }, [examId]);
 
   const summary = useMemo(() => {
     if (!exam || !exam.grades || exam.grades.length === 0) {
@@ -549,9 +586,17 @@ const ExamSubjectsScreen = () => {
   }
 
   return (
-    <>
+    <View style={[styles.container, { backgroundColor: isDark ? Colors.dark.background : colors.white }]}>
       {/* 헤더 */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: isDark ? Colors.dark.background : colors.white,
+            borderBottomColor: isDark ? colors.gray700 : colors.gray200,
+          },
+        ]}
+      >
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -572,7 +617,12 @@ const ExamSubjectsScreen = () => {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View
-          style={[styles.summaryCard, { backgroundColor: isDark ? colors.gray800 : colors.white }]}
+          style={[
+            styles.summaryCard,
+            {
+              backgroundColor: isDark ? colors.gray800 : colors.white,
+            },
+          ]}
         >
           <View style={styles.summaryHeaderRow}>
             <View style={styles.summaryTitleArea}>
@@ -712,7 +762,10 @@ const ExamSubjectsScreen = () => {
         <View
           style={[
             styles.subjectsSection,
-            { backgroundColor: isDark ? colors.gray800 : colors.white },
+            {
+              backgroundColor: isDark ? colors.gray800 : colors.white,
+              borderColor: isDark ? colors.gray700 : colors.gray200,
+            },
           ]}
         >
           <Text
@@ -726,7 +779,7 @@ const ExamSubjectsScreen = () => {
             <FlatList
               data={exam.grades}
               keyExtractor={item => item.id}
-              renderItem={({ item }) => {
+              renderItem={({ item, index }) => {
                 const maxScore = item.max_score || 100;
                 const tempScore = tempScores[item.id];
                 const displayScore =
@@ -757,6 +810,7 @@ const ExamSubjectsScreen = () => {
                         borderBottomColor: isDark ? colors.gray700 : colors.gray200,
                       },
                       isDeleting && styles.subjectCardDeleting,
+                      index === exam.grades.length - 1 && styles.subjectCardLast,
                     ]}
                   >
                     <View style={styles.subjectHeader}>
@@ -911,6 +965,23 @@ const ExamSubjectsScreen = () => {
           )}
         </View>
       </ScrollView>
+      {/* 공통 오류/알림 모달 */}
+      <AppModal
+        visible={alertModal.visible}
+        onRequestClose={closeAlertModal}
+        title={alertModal.title}
+        subtitle={alertModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={alertModal.variant === 'danger' ? 'danger' : 'primary'}
+        onConfirm={() => {
+          if (alertModal.onConfirm) {
+            alertModal.onConfirm();
+          }
+          closeAlertModal();
+        }}
+      />
       {/* 과목 추가 모달 */}
       <Modal
         transparent
@@ -1003,8 +1074,74 @@ const ExamSubjectsScreen = () => {
           </Pressable>
         </Pressable>
       </Modal>
+      {/* 과목 삭제 확인 모달 (중앙 알림 모달 규격) */}
+      <AppModal
+        visible={deleteGradeModalVisible}
+        onRequestClose={() => {
+          if (gradeDeleteTarget && deletingIds.has(gradeDeleteTarget.id)) return;
+          setDeleteGradeModalVisible(false);
+          setGradeDeleteTarget(null);
+        }}
+        title={
+          gradeDeleteTarget ? `\"${gradeDeleteTarget.name}\" 과목 삭제` : '과목 삭제'
+        }
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='삭제'
+        cancelText='취소'
+        confirmVariant='danger'
+        onConfirm={confirmDeleteGrade}
+        onCancel={() => {
+          if (gradeDeleteTarget && deletingIds.has(gradeDeleteTarget.id)) return;
+          setDeleteGradeModalVisible(false);
+          setGradeDeleteTarget(null);
+        }}
+        confirmDisabled={gradeDeleteTarget ? deletingIds.has(gradeDeleteTarget.id) : false}
+        content={
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? colors.gray300 : colors.textSecondary,
+              textAlign: 'center',
+            }}
+          >
+            이 과목을 삭제하시겠습니까?{'\n'}이 작업은 되돌릴 수 없습니다.
+          </Text>
+        }
+      />
+      {/* 시험 삭제 확인 모달 (중앙 알림 모달 규격) */}
+      <AppModal
+        visible={deleteExamModalVisible}
+        onRequestClose={() => {
+          if (deletingExam) return;
+          setDeleteExamModalVisible(false);
+        }}
+        title={exam ? `\"${exam.exam_name}\" 시험 삭제` : '시험 삭제'}
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='삭제'
+        cancelText='취소'
+        confirmVariant='danger'
+        onConfirm={confirmDeleteExam}
+        onCancel={() => {
+          if (deletingExam) return;
+          setDeleteExamModalVisible(false);
+        }}
+        confirmDisabled={deletingExam}
+        content={
+          <Text
+            style={{
+              fontSize: 14,
+              color: isDark ? colors.gray300 : colors.textSecondary,
+              textAlign: 'center',
+            }}
+          >
+            이 시험과 모든 과목을 삭제하시겠습니까?{'\n'}이 작업은 되돌릴 수 없습니다.
+          </Text>
+        }
+      />
       <BlockingLoader visible={addingSubject || deletingExam} message='처리 중...' />
-    </>
+    </View>
   );
 };
 
@@ -1048,11 +1185,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
     marginBottom: 16,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
     overflow: 'hidden',
   },
   summaryHeaderRow: {
@@ -1179,15 +1311,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: 12,
     padding: 16,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    borderWidth: 1,
   },
   subjectCard: {
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  subjectCardLast: {
+    borderBottomWidth: 0,
   },
   subjectCardDeleting: {
     opacity: 0.5,

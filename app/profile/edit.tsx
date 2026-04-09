@@ -1,6 +1,5 @@
 import React, { useState, useLayoutEffect, useEffect } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,6 +18,7 @@ import { colors, Colors } from '@/constants/colors';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Switch } from 'react-native';
+import AppModal from '@/components/AppModal';
 
 // 내 정보 변경 화면
 const ProfileEditScreen = () => {
@@ -28,6 +28,42 @@ const ProfileEditScreen = () => {
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
   const [saving, setSaving] = useState(false);
+  const [modalState, setModalState] = useState<{
+    visible: boolean;
+    title: string;
+    subtitle?: string;
+    isError?: boolean;
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+  });
+
+  const closeModal = () =>
+    setModalState(prev => ({
+      ...prev,
+      visible: false,
+      onConfirm: undefined,
+    }));
+
+  const showErrorModal = (message: string, title = '오류') => {
+    setModalState({
+      visible: true,
+      title,
+      subtitle: message,
+      isError: true,
+    });
+  };
+
+  const showInfoModal = (title: string, subtitle?: string, onConfirm?: () => void) => {
+    setModalState({
+      visible: true,
+      title,
+      subtitle,
+      isError: false,
+      onConfirm,
+    });
+  };
 
   // Stack 네비게이션 헤더 숨기기
   useLayoutEffect(() => {
@@ -40,9 +76,9 @@ const ProfileEditScreen = () => {
   const handleThemeToggle = async (value: boolean) => {
     try {
       await setTheme(value ? 'dark' : 'light');
-      Alert.alert('완료', '테마 설정이 저장되었습니다. 앱을 재시작하면 적용됩니다.');
+      showInfoModal('완료', '테마 설정이 저장되었습니다. 앱을 재시작하면 적용됩니다.');
     } catch (error) {
-      Alert.alert('오류', '테마 설정 저장 중 오류가 발생했습니다.');
+      showErrorModal('테마 설정 저장 중 오류가 발생했습니다.');
     }
   };
 
@@ -50,14 +86,14 @@ const ProfileEditScreen = () => {
 
   const handleSave = async () => {
     if (!user) {
-      Alert.alert('오류', '사용자 정보를 불러올 수 없습니다.');
+      showErrorModal('사용자 정보를 불러올 수 없습니다.');
       return;
     }
 
     const trimmed = nickname.trim();
 
     if (!trimmed) {
-      Alert.alert('오류', '닉네임을 입력해주세요.');
+      showErrorModal('닉네임을 입력해주세요.');
       return;
     }
 
@@ -74,14 +110,9 @@ const ProfileEditScreen = () => {
         }),
       });
       updateUser({ nickname: safeNickname, avatar: avatar || undefined });
-      Alert.alert('완료', '정보가 변경되었습니다.', [
-        {
-          text: '확인',
-          onPress: () => router.back(),
-        },
-      ]);
+      showInfoModal('완료', '정보가 변경되었습니다.', () => router.back());
     } catch (e) {
-      Alert.alert('오류', (e as Error).message ?? '정보 변경 중 오류가 발생했습니다.');
+      showErrorModal((e as Error).message ?? '정보 변경 중 오류가 발생했습니다.');
     } finally {
       setSaving(false);
     }
@@ -217,6 +248,22 @@ const ProfileEditScreen = () => {
           </ScrollView>
         </KeyboardAvoidingView>
       <BlockingLoader visible={saving} message='저장 중...' />
+      <AppModal
+        visible={modalState.visible}
+        onRequestClose={closeModal}
+        title={modalState.title}
+        subtitle={modalState.subtitle}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={modalState.isError ? 'danger' : 'primary'}
+        onConfirm={() => {
+          if (modalState.onConfirm) {
+            modalState.onConfirm();
+          }
+          closeModal();
+        }}
+      />
     </View>
   );
 };

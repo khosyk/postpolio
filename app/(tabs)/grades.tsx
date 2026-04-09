@@ -1,13 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { getApiUrl } from '@/config/api';
 import { ExamWithGrades } from '@/types/grade';
@@ -17,6 +9,7 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import { apiFetch } from '@/utils/apiClient';
 import { colors, Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AppModal from '@/components/AppModal';
 
 // 성적표 관리 탭 (시험 목록)
 const GradesScreen = () => {
@@ -27,6 +20,13 @@ const GradesScreen = () => {
   const [exams, setExams] = useState<ExamWithGrades[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [errorModal, setErrorModal] = useState<{
+    visible: boolean;
+    message: string;
+  }>({
+    visible: false,
+    message: '',
+  });
 
   // 시험 목록 조회
   const fetchExams = async () => {
@@ -41,7 +41,10 @@ const GradesScreen = () => {
       setExams(data.data?.exams || []);
     } catch (error) {
       console.error('Error fetching exams:', error);
-      Alert.alert('오류', '시험 목록을 불러오는 중 오류가 발생했습니다.');
+      setErrorModal({
+        visible: true,
+        message: '시험 목록을 불러오는 중 오류가 발생했습니다.',
+      });
     } finally {
       setLoading(false);
     }
@@ -213,6 +216,28 @@ const GradesScreen = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         />
       )}
+
+      <AppModal
+        visible={errorModal.visible}
+        onRequestClose={() =>
+          setErrorModal(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+        title='오류'
+        subtitle={errorModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant='danger'
+        onConfirm={() =>
+          setErrorModal(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+      />
     </View>
   );
 };

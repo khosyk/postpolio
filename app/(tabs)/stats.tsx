@@ -1,13 +1,20 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  TouchableOpacity,
+  Pressable,
+} from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import LineChart from '@/components/LineChart';
 import StatsSummary from '@/components/StatsSummary';
-import { IconSymbol } from '@/components/ui/IconSymbol';
+import DatePickerModal from '@/components/DatePickerModal';
 import { colors, getThemeColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { FAKE_STATS_DATA } from '@/constants/fakeStatsData';
-import RNDateTimePicker from '@react-native-community/datetimepicker';
 
 interface DailyStat {
   date: string;
@@ -36,6 +43,7 @@ const StatsScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
   const [summaryStats, setSummaryStats] = useState<SummaryStat | null>(null);
+  const [showEndPicker, setShowEndPicker] = useState(false);
 
   // 오늘 날짜
   const getToday = () => {
@@ -52,9 +60,6 @@ const StatsScreen: React.FC = () => {
   // 실제 통계 조회에 사용되는 적용된 날짜
   const [startDate, setStartDate] = useState<Date>(defaultStartDate);
   const [endDate, setEndDate] = useState<Date>(defaultEndDate);
-  // 날짜 피커에서 편집 중인 임시 값 (확인 시에만 적용)
-  const [startInputDate, setStartInputDate] = useState<Date>(defaultStartDate);
-  const [endInputDate, setEndInputDate] = useState<Date>(defaultEndDate);
   const [rangePreset, setRangePreset] = useState<RangePreset>('week');
 
   // 날짜 범위 문자열 변환 (API 호출 시 사용)
@@ -175,9 +180,13 @@ const StatsScreen: React.FC = () => {
     return `${year}.${month}.${day}`;
   };
 
-  const handlePresetChange = (preset: Exclude<RangePreset, 'custom'>) => {
+  // 종료일과 프리셋에 따라 시작/종료일 계산
+  const calculateRangeFromEnd = (
+    preset: Exclude<RangePreset, 'custom'>,
+    baseEnd: Date,
+  ): { start: Date; end: Date } => {
     // 종료일 기준으로 계산
-    const newEnd = new Date(endDate);
+    const newEnd = new Date(baseEnd);
     newEnd.setHours(0, 0, 0, 0);
 
     const newStart = new Date(newEnd);
@@ -197,11 +206,14 @@ const StatsScreen: React.FC = () => {
 
     newStart.setHours(0, 0, 0, 0);
 
+    return { start: newStart, end: newEnd };
+  };
+
+  const handlePresetChange = (preset: Exclude<RangePreset, 'custom'>) => {
+    const { start, end } = calculateRangeFromEnd(preset, endDate);
     setRangePreset(preset);
-    setStartDate(newStart);
-    setEndDate(newEnd);
-    setStartInputDate(newStart);
-    setEndInputDate(newEnd);
+    setStartDate(start);
+    setEndDate(end);
   };
 
   return (
@@ -243,27 +255,17 @@ const StatsScreen: React.FC = () => {
                 >
                   {formatDate(startDate)}
                 </Text>
-                <RNDateTimePicker
-                  value={startDate}
-                  mode='date'
-                  display='default'
-                  locale='ko-KR'
-                  onChange={(event, selectedDate) => {
-                    if (selectedDate) {
-                      setStartDate(selectedDate);
-                      setStartInputDate(selectedDate);
-                      setRangePreset('custom');
-                    }
-                  }}
-                  style={styles.hiddenDatePicker}
-                />
               </View>
             </View>
-
             <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
-
             {/* 종료일 */}
-            <View style={styles.dateButton}>
+            <TouchableOpacity
+              style={styles.dateButton}
+              activeOpacity={0.7}
+              onPress={() => {
+                setShowEndPicker(true);
+              }}
+            >
               <Text style={[styles.dateLabel, { color: themeColors.textSecondary }]}>종료일</Text>
               <View style={styles.dateValueWrapper}>
                 <Text
@@ -276,25 +278,11 @@ const StatsScreen: React.FC = () => {
                 >
                   {formatDate(endDate)}
                 </Text>
-                <RNDateTimePicker
-                  value={endDate}
-                  mode='date'
-                  display='default'
-                  locale='ko-KR'
-                  onChange={(event, selectedDate) => {
-                    if (selectedDate) {
-                      setEndDate(selectedDate);
-                      setEndInputDate(selectedDate);
-                      setRangePreset('custom');
-                    }
-                  }}
-                  style={styles.hiddenDatePicker}
-                />
               </View>
-            </View>
+            </TouchableOpacity>
           </View>
 
-          {/* <View style={[styles.rangeTabsContainer, { borderTopColor: themeColors.border }]}>
+          <View style={[styles.rangeTabsContainer, { borderTopColor: themeColors.border }]}>
             {(['week', 'month', 'year'] as const).map((preset, index) => {
               const label = preset === 'week' ? '1주일' : preset === 'month' ? '1개월' : '3개월';
               const isActive = rangePreset === preset;
@@ -325,7 +313,7 @@ const StatsScreen: React.FC = () => {
                 </Pressable>
               );
             })}
-          </View> */}
+          </View>
         </View>
 
         {/* 선 그래프 */}
@@ -359,6 +347,29 @@ const StatsScreen: React.FC = () => {
           </View>
         </View>
       )}
+
+      {/* 종료일 선택 모달 */}
+      <DatePickerModal
+        visible={showEndPicker}
+        value={endDate}
+        minimumDate={new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)}
+        maximumDate={new Date(today.getTime() + 365 * 24 * 60 * 60 * 1000)}
+        onConfirm={date => {
+          // 프리셋이 설정된 경우 종료일을 기준으로 다시 계산
+          if (rangePreset === 'custom') {
+            setEndDate(date);
+          } else {
+            const { start, end } = calculateRangeFromEnd(
+              rangePreset as Exclude<RangePreset, 'custom'>,
+              date,
+            );
+            setStartDate(start);
+            setEndDate(end);
+          }
+          setShowEndPicker(false);
+        }}
+        onClose={() => setShowEndPicker(false)}
+      />
     </View>
   );
 };
