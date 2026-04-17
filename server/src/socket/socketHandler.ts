@@ -8,11 +8,16 @@ import type {
 import messageService from '../services/messageService';
 import studyService from '../services/studyService';
 import groupRepository from '../repositories/groupRepository';
+import studyRepository from '../repositories/studyRepository';
 import userRepository from '../repositories/userRepository';
 import { logger } from '../utils/logger';
 
 // In-memory room state (실시간 사용자 추적용)
 const roomIdToUsers = new Map<string, Set<string>>(); // roomId -> Set<userId>
+const pendingCheckInByGroup = new Map<
+  string,
+  { expiresAt: number; checkInDurationSeconds: number; activeSessionIds: Set<string> }
+>();
 
 export const setupSocketHandlers = (
   io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>
@@ -241,13 +246,31 @@ export const setupSocketHandlers = (
 
       try {
         const result = await studyService.requestCheckIn(groupId, userId);
-
-        // 모든 멤버에게 체크인 요청 전송
-        io.to(groupId).emit('study:checkin:request', {
-          groupId: result.groupId,
-          checkInInterval: result.checkInInterval,
-          activeSessions: result.activeSessions,
+        const expiresAt = Date.now() + result.checkInDurationSeconds * 1000;
+        pendingCheckInByGroup.set(groupId, {
+          expiresAt,
+          checkInDurationSeconds: result.checkInDurationSeconds,
+          activeSessionIds: new Set(result.activeSessions),
         });
+
+        // 방에 연결된 각 소켓별로 활성 세션 ID를 붙여 전송 (클라이언트가 정확히 제출 가능)
+        const roomSockets = await io.in(groupId).fetchSockets();
+        await Promise.all(
+          roomSockets.map(async remote => {
+            const uid = remote.data.userId;
+            if (!uid) return;
+            const activeSession = await studyRepository.getActiveSession(groupId, uid);
+            if (!activeSession || !result.activeSessions.includes(activeSession.id)) return;
+            remote.emit('study:checkin:request', {
+              groupId: result.groupId,
+              checkInInterval: result.checkInInterval,
+              checkInDurationSeconds: result.checkInDurationSeconds,
+              remainingSeconds: result.checkInDurationSeconds,
+              activeSessions: result.activeSessions,
+              activeSessionId: activeSession.id,
+            });
+          })
+        );
       } catch (error) {
         logger.error('Error requesting check-in', { groupId, userId, error });
         socket.emit('error', {
@@ -259,8 +282,8 @@ export const setupSocketHandlers = (
     // 체크인 버튼 클릭 (Phase 6)
     socket.on(
       'study:checkin:submit',
-      async ({ groupId, sessionId }: { groupId: string; sessionId: string }) => {
-        if (!groupId || !sessionId || !userId) return;
+      async ({ groupId, sessionId }: { groupId: string; sessionId?: string }) => {
+        if (!groupId || !userId) return;
 
         try {
           const result = await studyService.submitCheckIn(groupId, userId, sessionId);
@@ -269,9 +292,31 @@ export const setupSocketHandlers = (
           io.to(groupId).emit('study:checkin:complete', {
             groupId,
             userId,
-            sessionId,
+            sessionId: result.sessionId ?? sessionId ?? '',
             isValid: result.isValid,
           });
+
+          // 제출 완료된 사용자의 세션은 pending 집합에서 제거
+          const pending = pendingCheckInByGroup.get(groupId);
+          if (pending && result.sessionId) {
+            pending.activeSessionIds.delete(result.sessionId);
+            if (pending.activeSessionIds.size === 0 || pending.expiresAt <= Date.now()) {
+              pendingCheckInByGroup.delete(groupId);
+            } else {
+              pendingCheckInByGroup.set(groupId, pending);
+            }
+          }
+
+          // 체크인 검증 실패로 세션이 종료된 경우, 해당 사용자 UI를 즉시 동기화
+          if (result.sessionEnded) {
+            socket.emit('study:time:update', {
+              groupId,
+              userId,
+              totalMinutes: result.totalMinutes ?? 0,
+              hasActiveSession: false,
+              activeSessionStartedAt: null,
+            });
+          }
 
           // 랭킹 업데이트
           const ranking = await studyService.getTop5Ranking(groupId);
@@ -313,6 +358,31 @@ export const setupSocketHandlers = (
           hasActiveSession: status.hasActiveSession,
           activeSessionStartedAt: status.activeSessionStartedAt,
         });
+
+        // 체크인 요청이 진행 중이고, 아직 제출하지 않은 사용자라면 재진입 시 체크인 UI 복원
+        const pending = pendingCheckInByGroup.get(groupId);
+        if (pending && status.hasActiveSession) {
+          const remainingSeconds = Math.floor((pending.expiresAt - Date.now()) / 1000);
+          if (remainingSeconds > 0) {
+            const group = await groupRepository.getGroupById(groupId);
+            const activeSession = await studyRepository.getActiveSession(groupId, userId);
+            if (activeSession && pending.activeSessionIds.has(activeSession.id)) {
+              const alreadyChecked = await studyRepository.hasCheckInRecord(activeSession.id, userId);
+              if (!alreadyChecked) {
+                socket.emit('study:checkin:request', {
+                  groupId,
+                  checkInInterval: group?.check_in_interval ?? 30,
+                  checkInDurationSeconds: pending.checkInDurationSeconds,
+                  remainingSeconds,
+                  activeSessions: Array.from(pending.activeSessionIds),
+                  activeSessionId: activeSession.id,
+                });
+              }
+            }
+          } else {
+            pendingCheckInByGroup.delete(groupId);
+          }
+        }
 
         // 그룹 멤버들의 공부시간 (그룹 챗 탭 및 방 상단 요약용)
         socket.emit('study:members:time:update', {

@@ -380,7 +380,7 @@ const PomodoroScreen = () => {
     if (user) {
       setLoading(true);
       fetchSettings();
-      // 저장된 세션 복원 (포모도로 탭/그룹챗 공유)
+      // 저장된 세션 복원 (포모도로 탭 내부 세션 유지)
       AsyncStorage.getItem(STORAGE_KEY).then(value => {
         if (value) {
           const data = JSON.parse(value) as {
@@ -445,6 +445,8 @@ const PomodoroScreen = () => {
     return `${year}.${month}.${day}`;
   };
 
+  const hasTodayProgress = todayCycleCount > 0 || todayStudyMinutes > 0;
+
   const getProgress = () => {
     if (!session) return 0;
     const total = session.duration_minutes * 60;
@@ -501,64 +503,76 @@ const PomodoroScreen = () => {
             {formatTodayRange()}
           </Text>
         </View>
-        <View style={styles.dailyStatsRow}>
-          <View
-            style={[
-              styles.dailyStatBox,
-              { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
-            ]}
-          >
-            <Text
+        {(todayStatsLoading || hasTodayProgress) && (
+          <View style={styles.dailyStatsRow}>
+            <View
               style={[
-                styles.dailyStatLabel,
-                { color: isDark ? colors.gray300 : colors.textSecondary },
+                styles.dailyStatBox,
+                { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
               ]}
             >
-              완료 세트
-            </Text>
-            <Text
-              style={[styles.dailyStatValue, { color: isDark ? colors.white : colors.textPrimary }]}
-            >
-              {todayStatsLoading ? '-' : `${todayCycleCount}회`}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.dailyStatBox,
-              { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
-            ]}
-          >
-            <Text
+              <Text
+                style={[
+                  styles.dailyStatLabel,
+                  { color: isDark ? colors.gray300 : colors.textSecondary },
+                ]}
+              >
+                완료 세트
+              </Text>
+              <Text
+                style={[
+                  styles.dailyStatValue,
+                  { color: isDark ? colors.white : colors.textPrimary },
+                ]}
+              >
+                {todayStatsLoading ? '-' : `${todayCycleCount}회`}
+              </Text>
+            </View>
+            <View
               style={[
-                styles.dailyStatLabel,
-                { color: isDark ? colors.gray300 : colors.textSecondary },
+                styles.dailyStatBox,
+                { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
               ]}
             >
-              공부 시간
-            </Text>
-            <Text
-              style={[styles.dailyStatValue, { color: isDark ? colors.white : colors.textPrimary }]}
-            >
-              {todayStatsLoading ? '-' : formatMinutes(todayStudyMinutes)}
-            </Text>
+              <Text
+                style={[
+                  styles.dailyStatLabel,
+                  { color: isDark ? colors.gray300 : colors.textSecondary },
+                ]}
+              >
+                공부 시간
+              </Text>
+              <Text
+                style={[
+                  styles.dailyStatValue,
+                  { color: isDark ? colors.white : colors.textPrimary },
+                ]}
+              >
+                {todayStatsLoading ? '-' : formatMinutes(todayStudyMinutes)}
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
         {/* 공부/휴식 시간 설정 (상단에서 바로 적용) */}
-        <View style={{ marginTop: 12 }}>
-          <MinutePicker
-            label='공부 시간'
-            value={settings.study_duration}
-            onChange={minutes => setSettings(prev => ({ ...prev, study_duration: minutes }))}
-            minimumValue={1}
-            maximumValue={1440}
-          />
-          <MinutePicker
-            label='휴식 시간'
-            value={settings.break_duration}
-            onChange={minutes => setSettings(prev => ({ ...prev, break_duration: minutes }))}
-            minimumValue={1}
-            maximumValue={1440}
-          />
+        <View style={styles.settingsRow}>
+          <View style={styles.settingsItem}>
+            <MinutePicker
+              label='공부 시간'
+              value={settings.study_duration}
+              onChange={minutes => setSettings(prev => ({ ...prev, study_duration: minutes }))}
+              minimumValue={1}
+              maximumValue={1440}
+            />
+          </View>
+          <View style={styles.settingsItem}>
+            <MinutePicker
+              label='휴식 시간'
+              value={settings.break_duration}
+              onChange={minutes => setSettings(prev => ({ ...prev, break_duration: minutes }))}
+              minimumValue={1}
+              maximumValue={1440}
+            />
+          </View>
         </View>
       </View>
 
@@ -836,7 +850,7 @@ const styles = StyleSheet.create({
   dailyStatsContainer: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 8,
     borderBottomWidth: 1,
   },
   dailyStatsHeader: {
@@ -870,6 +884,15 @@ const styles = StyleSheet.create({
   dailyStatValue: {
     fontSize: 18,
     fontWeight: '700',
+  },
+  settingsRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  settingsItem: {
+    flex: 1,
   },
 });
 

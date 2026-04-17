@@ -40,6 +40,7 @@ const ExploreScreen = () => {
   const [deleting, setDeleting] = useState(false);
   const [chatEnabled, setChatEnabled] = useState<boolean | null>(null);
   const [checkInInterval, setCheckInInterval] = useState<number | null>(null);
+  const [checkInDurationSeconds, setCheckInDurationSeconds] = useState<number | null>(null);
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupDescription, setEditGroupDescription] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -281,6 +282,7 @@ const ExploreScreen = () => {
         setSelectedGroup(fullGroup);
         setChatEnabled(fullGroup.chat_enabled);
         setCheckInInterval(fullGroup.check_in_interval);
+        setCheckInDurationSeconds(fullGroup.check_in_duration_seconds ?? 30);
         setEditGroupName(fullGroup.name);
         setEditGroupDescription(fullGroup.description ?? '');
         setEditingSettings(true);
@@ -291,11 +293,21 @@ const ExploreScreen = () => {
   };
 
   const handleSaveSettings = async () => {
-    if (!selectedGroup || chatEnabled === null || checkInInterval === null) return;
+    if (
+      !selectedGroup ||
+      chatEnabled === null ||
+      checkInInterval === null ||
+      checkInDurationSeconds === null
+    )
+      return;
 
     const trimmedName = editGroupName.trim();
     if (!trimmedName) {
       showError('그룹명을 입력해주세요.');
+      return;
+    }
+    if (checkInDurationSeconds < 10 || checkInDurationSeconds > 300) {
+      showError('체크인 노출 시간은 10~300초 사이로 설정해주세요.');
       return;
     }
 
@@ -331,6 +343,7 @@ const ExploreScreen = () => {
         body: JSON.stringify({
           chat_enabled: chatEnabled,
           check_in_interval: checkInInterval,
+          check_in_duration_seconds: checkInDurationSeconds,
         }),
       });
 
@@ -346,6 +359,7 @@ const ExploreScreen = () => {
       setEditingSettings(false);
       setChatEnabled(null);
       setCheckInInterval(null);
+      setCheckInDurationSeconds(null);
       setSelectedGroup(null);
       setEditGroupName('');
       setEditGroupDescription('');
@@ -627,6 +641,7 @@ const ExploreScreen = () => {
           setEditGroupDescription('');
           setChatEnabled(null);
           setCheckInInterval(null);
+          setCheckInDurationSeconds(null);
         }}
         title='그룹 설정'
         subtitle={selectedGroup?.name}
@@ -642,11 +657,13 @@ const ExploreScreen = () => {
           setEditGroupDescription('');
           setChatEnabled(null);
           setCheckInInterval(null);
+          setCheckInDurationSeconds(null);
         }}
         confirmDisabled={
           savingSettings ||
           chatEnabled === null ||
           checkInInterval === null ||
+          checkInDurationSeconds === null ||
           !editGroupName.trim()
         }
         content={
@@ -725,6 +742,30 @@ const ExploreScreen = () => {
                   const num = parseInt(text, 10);
                   if (!isNaN(num) && num > 0) setCheckInInterval(num);
                   else if (text === '') setCheckInInterval(null);
+                }}
+                keyboardType='number-pad'
+                placeholder='30'
+                placeholderTextColor={themeColors.textTertiary}
+              />
+            </View>
+            <View style={[styles.settingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>
+                체크인 노출 시간 (초)
+              </Text>
+              <TextInput
+                style={[
+                  styles.intervalInput,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                    color: themeColors.textPrimary,
+                  },
+                ]}
+                value={checkInDurationSeconds?.toString() ?? ''}
+                onChangeText={text => {
+                  const num = parseInt(text, 10);
+                  if (!isNaN(num) && num > 0) setCheckInDurationSeconds(num);
+                  else if (text === '') setCheckInDurationSeconds(null);
                 }}
                 keyboardType='number-pad'
                 placeholder='30'

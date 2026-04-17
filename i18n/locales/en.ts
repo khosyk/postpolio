@@ -28,7 +28,7 @@ export default {
     noUpcomingExams: 'No upcoming exams',
   },
   grades: {
-    title: 'Grades',
+    title: 'Manage',
     createExam: 'Create Exam',
     examName: 'Exam Name',
     examDate: 'Exam Date',

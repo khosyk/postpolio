@@ -11,7 +11,7 @@ import { colors, Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import AppModal from '@/components/AppModal';
 
-// 성적표 관리 탭 (시험 목록)
+// 시험 관리 탭 (시험 목록)
 const GradesScreen = () => {
   const { user } = useAuth();
   const colorScheme = useColorScheme() ?? 'light';
@@ -173,7 +173,7 @@ const GradesScreen = () => {
   };
 
   if (loading) {
-    return <BlockingLoader visible={true} message='성적표를 불러오는 중...' />;
+    return <BlockingLoader visible={true} message='시험 목록을 불러오는 중...' />;
   }
 
   return (
@@ -190,7 +190,7 @@ const GradesScreen = () => {
         ]}
       >
         <Text style={[styles.title, { color: isDark ? colors.white : colors.textPrimary }]}>
-          성적표
+          시험 관리
         </Text>
         <TouchableOpacity style={styles.addButton} onPress={handleCreateExam}>
           <IconSymbol name='add' size={24} color={colors.white} />

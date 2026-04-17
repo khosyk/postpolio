@@ -204,12 +204,13 @@ class GroupRepository {
   // 그룹 설정 변경
   async updateGroupSettings(
     groupId: string,
-    settings: { chat_enabled?: boolean; check_in_interval?: number }
+    settings: { chat_enabled?: boolean; check_in_interval?: number; check_in_duration_seconds?: number }
   ): Promise<StudyGroup> {
     try {
       const updateData: {
         chat_enabled?: boolean;
         check_in_interval?: number;
+        check_in_duration_seconds?: number;
         updated_at: string;
       } = {
         updated_at: new Date().toISOString(),
@@ -220,6 +221,9 @@ class GroupRepository {
       }
       if (settings.check_in_interval !== undefined) {
         updateData.check_in_interval = settings.check_in_interval;
+      }
+      if (settings.check_in_duration_seconds !== undefined) {
+        updateData.check_in_duration_seconds = settings.check_in_duration_seconds;
       }
 
       const { data, error } = await supabase

@@ -102,17 +102,24 @@ server.listen(PORT, () => {
 // Graceful Shutdown
 const gracefulShutdown = (signal: string) => {
   logger.info(`${signal} received, shutting down gracefully`);
-  
-  server.close(() => {
-    logger.info('Process terminated');
-    process.exit(0);
-  });
 
   // 강제 종료 타임아웃 (10초)
-  setTimeout(() => {
+  const forceShutdownTimer = setTimeout(() => {
     logger.error('Forced shutdown after timeout');
     process.exit(1);
   }, 10000);
+
+  // 이벤트 루프를 막지 않도록 처리
+  forceShutdownTimer.unref();
+
+  // websocket 연결을 먼저 닫아 HTTP 서버 종료가 지연되지 않게 한다.
+  io.close();
+
+  server.close(() => {
+    clearTimeout(forceShutdownTimer);
+    logger.info('Process terminated');
+    process.exit(0);
+  });
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

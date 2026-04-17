@@ -28,7 +28,7 @@ export default {
     noUpcomingExams: '다가오는 시험이 없습니다',
   },
   grades: {
-    title: '성적표',
+    title: '관리',
     createExam: '시험 추가',
     examName: '시험명',
     examDate: '시험 날짜',

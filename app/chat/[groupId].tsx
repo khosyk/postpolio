@@ -14,11 +14,13 @@ import {
   Pressable,
   Animated,
   Switch,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { Socket } from 'socket.io-client';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connectSocket, disconnectSocket } from '@/utils/socketClient';
 import { clientToServerEvents, serverToClientEvents } from '@/constants/socket';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,9 +33,10 @@ import MinutePicker from '@/components/MinutePicker';
 import { RankingEntry } from '@/types/group';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { colors, getThemeColors } from '@/constants/colors';
-import { PomodoroSession, PomodoroSettings } from '@/types/pomodoro';
+import { PomodoroSettings } from '@/types/pomodoro';
 import { useTheme } from '@/contexts/ThemeContext';
 import AppModal from '@/components/AppModal';
+import { storageKeys } from '@/constants/storage';
 
 interface Message {
   id: string;
@@ -44,8 +47,6 @@ interface Message {
   createdAt: string;
   type?: 'message' | 'system';
 }
-
-const STORAGE_KEY = 'pomodoro_session';
 
 const ChatRoomScreen = () => {
   const { groupId } = useLocalSearchParams<{ groupId: string }>();
@@ -60,6 +61,7 @@ const ChatRoomScreen = () => {
   const [editGroupDescription, setEditGroupDescription] = useState('');
   const [editChatEnabled, setEditChatEnabled] = useState<boolean | null>(null);
   const [editCheckInInterval, setEditCheckInInterval] = useState<number | null>(null);
+  const [editCheckInDurationSeconds, setEditCheckInDurationSeconds] = useState<number | null>(null);
   const [savingGroupSettings, setSavingGroupSettings] = useState(false);
   const [groupSettingsSavedModalVisible, setGroupSettingsSavedModalVisible] = useState(false);
   const [alertModal, setAlertModal] = useState<{
@@ -92,7 +94,6 @@ const ChatRoomScreen = () => {
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [checkInInterval, setCheckInInterval] = useState(30);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings | null>(null);
-  const [pomodoroSessionId, setPomodoroSessionId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [tempSettings, setTempSettings] = useState<PomodoroSettings>({
     study_duration: 25,
@@ -107,8 +108,78 @@ const ChatRoomScreen = () => {
   const currentGroupIdRef = useRef<string | null>(null);
   const eventHandlersRef = useRef<Map<string, (...args: any[]) => void>>(new Map());
   const modalOpacity = useRef(new Animated.Value(0)).current;
+  const checkInDeadlineRef = useRef<number | null>(null);
+  const activeCheckInSessionIdRef = useRef<string | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const isOwner = group && user ? group.owner_id === user.id : false;
+
+  const dismissCheckInUi = useCallback(
+    async (clearStorage: boolean) => {
+      setCheckInVisible(false);
+      setCheckInTimeRemaining(0);
+      checkInDeadlineRef.current = null;
+      activeCheckInSessionIdRef.current = null;
+      if (groupId) {
+        const notifId = `checkin-${groupId}`;
+        try {
+          await Notifications.cancelScheduledNotificationAsync(notifId);
+        } catch {
+          // 알림 취소 실패는 무시
+        }
+        if (clearStorage) {
+          try {
+            await AsyncStorage.removeItem(storageKeys.group.checkInPending(groupId));
+          } catch {
+            // 무시
+          }
+        }
+      }
+    },
+    [groupId],
+  );
+
+  const persistCheckInPending = useCallback(
+    async (deadlineMs: number, sessionId: string | undefined, intervalMinutes: number) => {
+      if (!groupId) return;
+      try {
+        await AsyncStorage.setItem(
+          storageKeys.group.checkInPending(groupId),
+          JSON.stringify({
+            deadlineMs,
+            sessionId,
+            checkInInterval: intervalMinutes,
+          }),
+        );
+      } catch {
+        // 무시
+      }
+    },
+    [groupId],
+  );
+
+  const scheduleCheckInNotification = useCallback(async (remainingSeconds: number) => {
+    if (!groupId) return;
+    const notifId = `checkin-${groupId}`;
+    const sec = Math.max(1, Math.min(remainingSeconds, 3600));
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notifId);
+      await Notifications.scheduleNotificationAsync({
+        identifier: notifId,
+        content: {
+          title: '체크인',
+          body: '공부 증명 체크인을 해주세요.',
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: sec,
+          repeats: false,
+        },
+      });
+    } catch {
+      // 로컬 알림 실패는 무시 (Expo Go/권한 제한 등)
+    }
+  }, [groupId]);
 
   const showError = (message: string, title = '오류') => {
     setAlertModal({
@@ -140,15 +211,26 @@ const ChatRoomScreen = () => {
     setEditGroupDescription(group.description ?? '');
     setEditChatEnabled(group.chat_enabled);
     setEditCheckInInterval(group.check_in_interval);
+    setEditCheckInDurationSeconds(group.check_in_duration_seconds ?? 30);
     setEditingGroup(true);
   }, [group]);
 
   const handleSaveGroupEdit = useCallback(async () => {
-    if (!group || editChatEnabled === null || editCheckInInterval === null) return;
+    if (
+      !group ||
+      editChatEnabled === null ||
+      editCheckInInterval === null ||
+      editCheckInDurationSeconds === null
+    )
+      return;
 
     const trimmedName = editGroupName.trim();
     if (!trimmedName) {
       showError('그룹명을 입력해주세요.');
+      return;
+    }
+    if (editCheckInDurationSeconds < 10 || editCheckInDurationSeconds > 300) {
+      showError('체크인 노출 시간은 10~300초 사이로 설정해주세요.');
       return;
     }
 
@@ -183,6 +265,7 @@ const ChatRoomScreen = () => {
         body: JSON.stringify({
           chat_enabled: editChatEnabled,
           check_in_interval: editCheckInInterval,
+          check_in_duration_seconds: editCheckInDurationSeconds,
         }),
       });
 
@@ -204,7 +287,14 @@ const ChatRoomScreen = () => {
     } finally {
       setSavingGroupSettings(false);
     }
-  }, [group, editChatEnabled, editCheckInInterval, editGroupName, editGroupDescription]);
+  }, [
+    group,
+    editChatEnabled,
+    editCheckInInterval,
+    editCheckInDurationSeconds,
+    editGroupName,
+    editGroupDescription,
+  ]);
 
   // 그룹 정보 조회
   useEffect(() => {
@@ -227,6 +317,7 @@ const ChatRoomScreen = () => {
           setEditGroupDescription(g.description ?? '');
           setEditChatEnabled(g.chat_enabled);
           setEditCheckInInterval(g.check_in_interval);
+          setEditCheckInDurationSeconds(g.check_in_duration_seconds ?? 30);
         }
       } catch {
         showError('그룹 정보를 불러올 수 없습니다.');
@@ -340,15 +431,33 @@ const ChatRoomScreen = () => {
           groupId: string;
           checkInInterval: number;
           activeSessions: string[];
+          checkInDurationSeconds?: number;
+          remainingSeconds?: number;
+          activeSessionId?: string;
         }) => {
-          if (!isMounted) return;
+          if (!isMounted || payload.groupId !== groupId) return;
+          const remaining = Math.max(
+            1,
+            payload.remainingSeconds ?? payload.checkInDurationSeconds ?? 30,
+          );
+          const deadlineMs = Date.now() + remaining * 1000;
+          checkInDeadlineRef.current = deadlineMs;
+          activeCheckInSessionIdRef.current = payload.activeSessionId ?? null;
+          setCheckInInterval(payload.checkInInterval);
+          setCheckInTimeRemaining(remaining);
           setCheckInVisible(true);
-          setCheckInTimeRemaining(payload.checkInInterval * 60);
+          void persistCheckInPending(deadlineMs, payload.activeSessionId, payload.checkInInterval);
+          void scheduleCheckInNotification(remaining);
         };
 
-        const handleCheckInComplete = () => {
-          if (!isMounted) return;
-          setCheckInVisible(false);
+        const handleCheckInComplete = (payload: {
+          groupId: string;
+          userId: string;
+          sessionId?: string;
+          isValid?: boolean;
+        }) => {
+          if (!isMounted || payload.groupId !== groupId || payload.userId !== user.id) return;
+          void dismissCheckInUi(true);
         };
 
         const handleRankingUpdate = (payload: { groupId: string; ranking: RankingEntry[] }) => {
@@ -360,9 +469,33 @@ const ChatRoomScreen = () => {
           groupId: string;
           userId: string;
           totalMinutes: number;
+          hasActiveSession?: boolean;
+          activeSessionStartedAt?: string | null;
         }) => {
-          if (!isMounted || payload.userId !== user.id) return;
+          if (!isMounted || payload.groupId !== groupId || payload.userId !== user.id) return;
           setTodayMinutes(payload.totalMinutes);
+
+          // 재진입 시 서버 권위 상태(study_sessions active 여부)로 복원
+          if (payload.hasActiveSession) {
+            setIsStudyActive(true);
+            setCurrentSessionType('study');
+
+            if (payload.activeSessionStartedAt) {
+              const startedAtMs = new Date(payload.activeSessionStartedAt).getTime();
+              if (Number.isFinite(startedAtMs)) {
+                const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+                setElapsedSeconds(elapsed);
+              }
+            }
+            return;
+          }
+
+          if (payload.hasActiveSession === false) {
+            setIsStudyActive(false);
+            setCurrentSessionType('study');
+            setElapsedSeconds(0);
+            void dismissCheckInUi(true);
+          }
         };
 
         // 입장 완료 이벤트 핸들러
@@ -477,7 +610,60 @@ const ChatRoomScreen = () => {
         currentGroupIdRef.current = null;
       }
     };
-  }, [groupId, user]);
+  }, [groupId, user, dismissCheckInUi, persistCheckInPending, scheduleCheckInNotification]);
+
+  // 앱이 백그라운드에서 돌아올 때 체크인 남은 시간을 마감 시각 기준으로 동기화
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        const deadline = checkInDeadlineRef.current;
+        if (deadline && checkInVisible) {
+          const left = Math.floor((deadline - Date.now()) / 1000);
+          if (left <= 0) {
+            void dismissCheckInUi(true);
+          } else {
+            setCheckInTimeRemaining(left);
+          }
+        }
+      }
+      appStateRef.current = next;
+    });
+    return () => sub.remove();
+  }, [checkInVisible, dismissCheckInUi]);
+
+  // 앱 재시작 후 체크인 창이 열려 있었다면 복원 (서버 study:status와 함께 동작)
+  useEffect(() => {
+    if (!groupId || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(storageKeys.group.checkInPending(groupId));
+        if (!raw || cancelled) return;
+        const parsed = JSON.parse(raw) as {
+          deadlineMs?: number;
+          sessionId?: string;
+          checkInInterval?: number;
+        };
+        const deadlineMs = parsed.deadlineMs;
+        if (!deadlineMs || deadlineMs <= Date.now()) {
+          await AsyncStorage.removeItem(storageKeys.group.checkInPending(groupId));
+          return;
+        }
+        checkInDeadlineRef.current = deadlineMs;
+        activeCheckInSessionIdRef.current = parsed.sessionId ?? null;
+        if (typeof parsed.checkInInterval === 'number') {
+          setCheckInInterval(parsed.checkInInterval);
+        }
+        setCheckInTimeRemaining(Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)));
+        setCheckInVisible(true);
+      } catch {
+        // 무시
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId, user?.id]);
 
   // 타이머 업데이트 (포모도로 설정 기반)
   useEffect(() => {
@@ -515,22 +701,25 @@ const ChatRoomScreen = () => {
     };
   }, [isStudyActive, currentSessionType, pomodoroSettings]);
 
-  // 체크인 타이머
+  // 체크인 타이머 (마감 시각 기준 — 백그라운드에서도 남은 시간이 맞게 감소)
   useEffect(() => {
-    if (checkInVisible && checkInTimeRemaining > 0) {
-      const timer = setInterval(() => {
-        setCheckInTimeRemaining(prev => {
-          if (prev <= 1) {
-            setCheckInVisible(false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    if (!checkInVisible || !checkInDeadlineRef.current) return;
 
-      return () => clearInterval(timer);
-    }
-  }, [checkInVisible, checkInTimeRemaining]);
+    const tick = () => {
+      const deadline = checkInDeadlineRef.current;
+      if (!deadline) return;
+      const left = Math.floor((deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        void dismissCheckInUi(true);
+        return;
+      }
+      setCheckInTimeRemaining(left);
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [checkInVisible, dismissCheckInUi]);
 
   // 메시지 전송
   const handleSendMessage = useCallback(() => {
@@ -585,8 +774,6 @@ const ChatRoomScreen = () => {
     const minutes = total % 60;
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
   };
-
-  const effectiveTimerDuration = pomodoroSettings?.study_duration ?? checkInInterval;
 
   // 포모도로 설정 저장
   const handleSaveSettings = useCallback(async () => {
@@ -682,10 +869,11 @@ const ChatRoomScreen = () => {
   // 현재 세션 진행률 (버튼 내부 왼쪽 -> 오른쪽 채움)
   const sessionProgress = useMemo(() => {
     if (!pomodoroSettings || !isStudyActive) return 0;
-    const durationMinutes =
+    const rawDuration =
       currentSessionType === 'study'
         ? pomodoroSettings.study_duration
         : pomodoroSettings.break_duration;
+    const durationMinutes = Math.max(1, Math.min(1440, Math.round(Number(rawDuration) || 1)));
     const totalSeconds = Math.max(durationMinutes * 60, 1);
     return Math.max(0, Math.min(elapsedSeconds / totalSeconds, 1));
   }, [pomodoroSettings, isStudyActive, currentSessionType, elapsedSeconds]);
@@ -712,41 +900,6 @@ const ChatRoomScreen = () => {
   const handleStartStudy = useCallback(async () => {
     if (!socket || !groupId || !user) return;
 
-    try {
-      // 포모도로 세션도 함께 생성하여 통계/포모도로 탭과 공유
-      const duration = effectiveTimerDuration;
-      const data = await apiFetch<{ data?: { session?: PomodoroSession } }>(
-        getApiUrl('/api/pomodoro/sessions'),
-        {
-          method: 'POST',
-          requireAuth: true,
-          body: JSON.stringify({
-            type: 'study',
-            duration_minutes: duration,
-          }),
-        },
-      );
-
-      const newSession = data.data?.session;
-      if (newSession) {
-        setPomodoroSessionId(newSession.id);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            sessionId: newSession.id,
-            startTime: Date.now(),
-            duration: duration * 60,
-            type: 'study',
-            isTest: false,
-          }),
-        );
-      }
-    } catch (e) {
-      // 세션 생성 실패는 채팅방 공부 흐름을 막지 않음
-      // eslint-disable-next-line no-console
-      console.error('Error starting shared pomodoro session from group chat:', e);
-    }
-
     // 그룹 공부 시작 소켓 이벤트
     socket.emit(clientToServerEvents.studyStart, { groupId });
     setIsStudyActive(true);
@@ -767,7 +920,7 @@ const ChatRoomScreen = () => {
     } catch {
       // 알림 실패는 무시
     }
-  }, [socket, groupId, user, effectiveTimerDuration, group]);
+  }, [socket, groupId, user, group]);
 
   // 공부 종료
   const handleStopStudy = useCallback(async () => {
@@ -779,22 +932,6 @@ const ChatRoomScreen = () => {
     setElapsedSeconds(0);
     setCurrentSessionType('study');
 
-    // 포모도로 세션 완료 처리
-    if (pomodoroSessionId) {
-      try {
-        await apiFetch(getApiUrl(`/api/pomodoro/sessions/${pomodoroSessionId}/complete`), {
-          method: 'PUT',
-          requireAuth: true,
-        });
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Error completing shared pomodoro session from group chat:', e);
-      } finally {
-        setPomodoroSessionId(null);
-        await AsyncStorage.removeItem(STORAGE_KEY);
-      }
-    }
-
     // 진행 중인 알림 정리
     try {
       await Notifications.dismissAllNotificationsAsync();
@@ -802,22 +939,24 @@ const ChatRoomScreen = () => {
       // 무시
     }
 
+    void dismissCheckInUi(true);
+
     // 공부 종료 후 통계 다시 조회 (서버에서 time update가 늦게 올 수 있으므로)
     setTimeout(() => {
       if (socket && groupId) {
         socket.emit(clientToServerEvents.studyStatus, { groupId });
       }
     }, 500);
-  }, [socket, groupId, pomodoroSessionId, user]);
+  }, [socket, groupId, user, dismissCheckInUi]);
 
   // 체크인 버튼 클릭
   const handleCheckIn = useCallback(() => {
     if (!socket || !groupId) return;
 
-    // 활성 세션 ID는 서버에서 처리하므로 임시로 빈 문자열 전송
+    const sessionId = activeCheckInSessionIdRef.current;
     socket.emit(clientToServerEvents.studyCheckInSubmit, {
       groupId,
-      sessionId: '', // 서버에서 활성 세션을 찾아서 처리
+      ...(sessionId ? { sessionId } : {}),
     });
   }, [socket, groupId]);
 
@@ -861,6 +1000,7 @@ const ChatRoomScreen = () => {
           savingGroupSettings ||
           editChatEnabled === null ||
           editCheckInInterval === null ||
+          editCheckInDurationSeconds === null ||
           !editGroupName.trim()
         }
         content={
@@ -937,6 +1077,30 @@ const ChatRoomScreen = () => {
                   const num = parseInt(text, 10);
                   if (!isNaN(num) && num > 0) setEditCheckInInterval(num);
                   else if (text === '') setEditCheckInInterval(null);
+                }}
+                keyboardType='number-pad'
+                placeholder='30'
+                placeholderTextColor={themeColors.textTertiary}
+              />
+            </View>
+            <View style={[styles.groupSettingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.groupSettingLabel, { color: themeColors.textPrimary }]}>
+                체크인 노출 시간 (초)
+              </Text>
+              <TextInput
+                style={[
+                  styles.groupIntervalInput,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                    color: themeColors.textPrimary,
+                  },
+                ]}
+                value={editCheckInDurationSeconds?.toString() ?? ''}
+                onChangeText={text => {
+                  const num = parseInt(text, 10);
+                  if (!isNaN(num) && num > 0) setEditCheckInDurationSeconds(num);
+                  else if (text === '') setEditCheckInDurationSeconds(null);
                 }}
                 keyboardType='number-pad'
                 placeholder='30'
