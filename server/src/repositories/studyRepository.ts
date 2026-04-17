@@ -109,6 +109,24 @@ class StudyRepository {
     }
   }
 
+  // 사용자의 모든 활성 세션 조회 (그룹 무관)
+  async getActiveSessionsByUser(userId: string): Promise<StudySession[]> {
+    try {
+      const { data, error } = await supabase
+        .from('study_sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('started_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching active sessions by user:', error);
+      throw error;
+    }
+  }
+
   // Top 5 랭킹 조회 (특정 날짜)
   async getTop5Ranking(groupId: string, date: string): Promise<StudySession[]> {
     try {
@@ -180,6 +198,25 @@ class StudyRepository {
       return data || [];
     } catch (error) {
       console.error('Error fetching valid check-ins:', error);
+      throw error;
+    }
+  }
+
+  // 특정 사용자의 체크인 제출 여부 확인 (유효/무효 포함)
+  async hasCheckInRecord(sessionId: string, userId: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase
+        .from('check_in_records')
+        .select('id')
+        .eq('session_id', sessionId)
+        .eq('user_id', userId)
+        .limit(1)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') throw error;
+      return !!data;
+    } catch (error) {
+      console.error('Error checking check-in record existence:', error);
       throw error;
     }
   }

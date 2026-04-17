@@ -123,6 +123,7 @@ export interface StudyGroup {
   owner_id: string;
   chat_enabled: boolean;
   check_in_interval: number;
+  check_in_duration_seconds?: number;
   created_at: string;
   updated_at: string;
 }
@@ -147,6 +148,7 @@ export interface UpdateGroupRequest {
 export interface UpdateGroupSettingsRequest {
   chat_enabled?: boolean;
   check_in_interval?: number;
+  check_in_duration_seconds?: number;
 }
 
 export interface InviteMemberRequest {

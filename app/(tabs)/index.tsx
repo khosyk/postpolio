@@ -1,14 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -22,6 +13,7 @@ import { Skeleton, SkeletonChip } from '@/components/Skeleton';
 import { apiFetch, AuthError } from '@/utils/apiClient';
 import { colors, Colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AppModal from '@/components/AppModal';
 
 const FAVORITES_STORAGE_KEY = 'group_favorites';
 
@@ -37,6 +29,17 @@ const HomeScreen = () => {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [upcomingExam, setUpcomingExam] = useState<ExamWithGrades | null>(null);
   const [loadingGrades, setLoadingGrades] = useState(false);
+  const [todayStudyMinutes, setTodayStudyMinutes] = useState(0);
+  const [loadingTodayStudy, setLoadingTodayStudy] = useState(false);
+  const [withdrawConfirmVisible, setWithdrawConfirmVisible] = useState(false);
+  const [withdrawResultModal, setWithdrawResultModal] = useState<{
+    visible: boolean;
+    isError?: boolean;
+    message: string;
+  }>({
+    visible: false,
+    message: '',
+  });
 
   const baseNickname = user?.nickname || (user?.email && user.email.split('@')[0]) || '게스트';
   const nickname = baseNickname.length > 8 ? baseNickname.slice(0, 8) : baseNickname;
@@ -112,6 +115,33 @@ const HomeScreen = () => {
     }
   };
 
+  // 오늘 공부 시간 조회
+  const fetchTodayStudyMinutes = async () => {
+    try {
+      setLoadingTodayStudy(true);
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
+      const data = await apiFetch<{ data?: Array<{ totalMinutes?: number }> }>(
+        getApiUrl(`/api/stats/daily?startDate=${dateStr}&endDate=${dateStr}`),
+        {
+          method: 'GET',
+          requireAuth: true,
+        }
+      );
+
+      const total = (data.data || []).reduce((sum, item) => sum + (item.totalMinutes ?? 0), 0);
+      setTodayStudyMinutes(total);
+    } catch {
+      setTodayStudyMinutes(0);
+    } finally {
+      setLoadingTodayStudy(false);
+    }
+  };
+
   // D-day 계산
   const calculateDDay = (examDate: string): number => {
     const today = new Date();
@@ -155,6 +185,7 @@ const HomeScreen = () => {
       loadFavorites();
       fetchGroups();
       fetchUpcomingExam();
+      fetchTodayStudyMinutes();
     } else {
       setLoading(false);
     }
@@ -166,6 +197,7 @@ const HomeScreen = () => {
       if (user) {
         fetchGroups();
         fetchUpcomingExam();
+        fetchTodayStudyMinutes();
       }
     }, [user])
   );
@@ -206,6 +238,15 @@ const HomeScreen = () => {
     router.push(`/chat/${groupId}`);
   };
 
+  const formatMinutes = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours > 0) {
+      return `${hours}시간 ${mins}분`;
+    }
+    return `${mins}분`;
+  };
+
   const handleLogout = async () => {
     setMenuVisible(false);
     await logout();
@@ -218,44 +259,46 @@ const HomeScreen = () => {
   };
 
   const handleWithdraw = () => {
-    Alert.alert('회원탈퇴', '정말 회원탈퇴 하시겠습니까?\n이 작업은 되돌릴 수 없습니다.', [
-      {
-        text: '취소',
-        style: 'cancel',
-      },
-      {
-        text: '회원탈퇴',
-        style: 'destructive',
-        onPress: async () => {
-          setMenuVisible(false);
-          try {
-            setWithdrawing(true);
-            const data = await apiFetch<{ success?: boolean; message?: string }>(
-              getAuthUrl('WITHDRAW'),
-              {
-                method: 'DELETE',
-                requireAuth: true,
-              }
-            );
+    setWithdrawConfirmVisible(true);
+  };
 
-            if (!data?.success) {
-              Alert.alert('오류', data?.message ?? '회원탈퇴 중 오류가 발생했습니다.');
-              return;
-            }
+  const handleConfirmWithdraw = async () => {
+    setWithdrawConfirmVisible(false);
+    setMenuVisible(false);
+    try {
+      setWithdrawing(true);
+      const data = await apiFetch<{ success?: boolean; message?: string }>(getAuthUrl('WITHDRAW'), {
+        method: 'DELETE',
+        requireAuth: true,
+      });
 
-            Alert.alert('완료', '회원탈퇴가 완료되었습니다.');
-            await logout();
-            router.replace('/(auth)/login');
-          } catch (e) {
-            if (!(e instanceof AuthError)) {
-              Alert.alert('오류', '회원탈퇴 중 오류가 발생했습니다.');
-            }
-          } finally {
-            setWithdrawing(false);
-          }
-        },
-      },
-    ]);
+      if (!data?.success) {
+        setWithdrawResultModal({
+          visible: true,
+          isError: true,
+          message: data?.message ?? '회원탈퇴 중 오류가 발생했습니다.',
+        });
+        return;
+      }
+
+      setWithdrawResultModal({
+        visible: true,
+        isError: false,
+        message: '회원탈퇴가 완료되었습니다.',
+      });
+      await logout();
+      router.replace('/(auth)/login');
+    } catch (e) {
+      if (!(e instanceof AuthError)) {
+        setWithdrawResultModal({
+          visible: true,
+          isError: true,
+          message: '회원탈퇴 중 오류가 발생했습니다.',
+        });
+      }
+    } finally {
+      setWithdrawing(false);
+    }
   };
 
   return (
@@ -298,7 +341,15 @@ const HomeScreen = () => {
             </TouchableOpacity>
           </View>
           {loadingGrades ? (
-            <View style={styles.chartContainer}>
+            <View
+              style={[
+                styles.chartContainer,
+                {
+                  backgroundColor: isDark ? colors.gray800 : colors.white,
+                  borderColor: isDark ? colors.gray700 : colors.gray200,
+                },
+              ]}
+            >
               {/* 시험 이름 + D-day 스켈레톤 */}
               <View style={styles.examHeader}>
                 <Skeleton width='60%' height={20} />
@@ -334,11 +385,16 @@ const HomeScreen = () => {
               </View>
             </View>
           ) : upcomingExam ? (
-            <View
+            <TouchableOpacity
               style={[
                 styles.chartContainer,
-                { backgroundColor: isDark ? colors.gray800 : colors.white },
+                {
+                  backgroundColor: isDark ? colors.gray800 : colors.white,
+                  borderColor: isDark ? colors.gray700 : colors.gray200,
+                },
               ]}
+              activeOpacity={0.9}
+              onPress={() => router.push(`/grades/${upcomingExam.id}/subjects`)}
             >
               <View style={styles.examHeader}>
                 <Text style={[styles.examName, { color: isDark ? colors.white : colors.textPrimary }]}>
@@ -391,12 +447,6 @@ const HomeScreen = () => {
                       style={[styles.progressBarFill, { width: `${upcomingTotals.progress}%` }]}
                     />
                   </View>
-                  <TouchableOpacity
-                    style={styles.manageSubjectsButton}
-                    onPress={() => router.push(`/grades/${upcomingExam.id}/subjects`)}
-                  >
-                    <Text style={styles.manageSubjectsText}>과목별 목표 점수 관리하기</Text>
-                  </TouchableOpacity>
                 </View>
               ) : (
                 <View style={styles.noGradesContainer}>
@@ -413,12 +463,15 @@ const HomeScreen = () => {
                   </TouchableOpacity>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
           ) : (
             <View
               style={[
                 styles.chartContainer,
-                { backgroundColor: isDark ? colors.gray800 : colors.white },
+                {
+                  backgroundColor: isDark ? colors.gray800 : colors.white,
+                  borderColor: isDark ? colors.gray700 : colors.gray200,
+                },
               ]}
             >
               <TouchableOpacity
@@ -429,6 +482,27 @@ const HomeScreen = () => {
               </TouchableOpacity>
             </View>
           )}
+        </View>
+
+        {/* 오늘 총 공부 시간 */}
+        <View
+          style={[
+            styles.todayStudyCard,
+            {
+              backgroundColor: isDark ? colors.gray800 : colors.white,
+              borderColor: isDark ? colors.gray700 : colors.gray200,
+            },
+          ]}
+        >
+          <View style={styles.todayStudyHeader}>
+            <Text style={[styles.todayStudyTitle, { color: isDark ? colors.white : colors.textPrimary }]}>
+              오늘 총 공부 시간
+            </Text>
+            <IconSymbol name='timer' size={18} color={colors.blue500} />
+          </View>
+          <Text style={styles.todayStudyValue}>
+            {loadingTodayStudy ? '...' : formatMinutes(todayStudyMinutes)}
+          </Text>
         </View>
 
         {/* 그룹 목록 섹션 */}
@@ -525,6 +599,44 @@ const HomeScreen = () => {
         )}
       </View>
       </ScrollView>
+
+      {/* 회원탈퇴 확인 모달 */}
+      <AppModal
+        visible={withdrawConfirmVisible}
+        onRequestClose={() => setWithdrawConfirmVisible(false)}
+        title='회원탈퇴'
+        subtitle='정말 회원탈퇴 하시겠습니까? 이 작업은 되돌릴 수 없습니다.'
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='회원탈퇴'
+        cancelText='취소'
+        confirmVariant='danger'
+        onConfirm={handleConfirmWithdraw}
+        onCancel={() => setWithdrawConfirmVisible(false)}
+      />
+
+      {/* 회원탈퇴 결과 모달 */}
+      <AppModal
+        visible={withdrawResultModal.visible}
+        onRequestClose={() =>
+          setWithdrawResultModal(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+        title={withdrawResultModal.isError ? '오류' : '완료'}
+        subtitle={withdrawResultModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={withdrawResultModal.isError ? 'danger' : 'primary'}
+        onConfirm={() =>
+          setWithdrawResultModal(prev => ({
+            ...prev,
+            visible: false,
+          }))
+        }
+      />
 
       {/* 프로필 메뉴 모달 */}
       <Modal
@@ -624,18 +736,14 @@ const styles = StyleSheet.create({
   chartContainer: {
     borderRadius: 12,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 1,
   },
   loadingText: {
     fontSize: 14,
     color: '#6B7280',
   },
   moreLink: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#2563EB',
     fontWeight: '600',
   },
@@ -646,7 +754,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   examName: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     flex: 1,
   },
@@ -671,15 +779,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   examSummaryLabel: {
-    fontSize: 12,
+    fontSize: 11,
     marginBottom: 4,
   },
   examSummaryValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   examSummaryPercent: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#2563EB',
   },
@@ -692,19 +800,6 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 999,
     backgroundColor: '#2563EB',
-  },
-  manageSubjectsButton: {
-    marginTop: 12,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#EFF6FF',
-  },
-  manageSubjectsText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2563EB',
   },
   noGradesContainer: {
     alignItems: 'center',
@@ -739,6 +834,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  todayStudyCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  todayStudyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  todayStudyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  todayStudyValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.blue500,
+  },
   groupsSection: {
     marginBottom: 16,
   },
@@ -746,10 +863,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
   },
   groupsContainer: {},
@@ -807,15 +924,15 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   chipName: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     marginBottom: 2,
     textAlign: 'center',
   },
   chipDescription: {
-    fontSize: 9,
+    fontSize: 10,
     textAlign: 'center',
-    lineHeight: 11,
+    lineHeight: 12,
   },
   emptyContainer: {
     flex: 1,

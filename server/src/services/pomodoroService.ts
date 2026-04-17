@@ -1,7 +1,21 @@
 import pomodoroRepository from '../repositories/pomodoroRepository';
+import studyRepository from '../repositories/studyRepository';
 import { PomodoroSession, PomodoroSettings, UpdatePomodoroSettingsRequest } from '../types';
 
 class PomodoroService {
+  // 공부 세션 started_at 기준 경과 시간(분) 계산
+  private getElapsedMinutesFromStartedAt(startedAtIso: string): number {
+    try {
+      const startedAt = new Date(startedAtIso);
+      const now = new Date();
+      const diffMs = now.getTime() - startedAt.getTime();
+      if (Number.isNaN(diffMs) || diffMs <= 0) return 0;
+      return Math.max(1, Math.round(diffMs / (1000 * 60)));
+    } catch {
+      return 0;
+    }
+  }
+
   // 세션 경과 시간(분) 계산
   private getElapsedMinutes(session: PomodoroSession): number {
     try {
@@ -17,15 +31,37 @@ class PomodoroService {
     }
   }
 
+  // DB 제약 위반 방지를 위해 저장 가능한 duration으로 정규화
+  // - 실제 경과 시간(elapsed)
+  // - 기존 세션 duration_minutes(사용자 설정값)
+  // - 서버 스키마 상한(1440분)
+  // 중 가장 보수적인 값으로 제한한다.
+  private getSafeCompletedDurationMinutes(session: PomodoroSession): number {
+    const elapsed = this.getElapsedMinutes(session);
+    const sessionDuration = Math.max(1, Math.round(Number(session.duration_minutes) || 1));
+    return Math.max(1, Math.min(elapsed, sessionDuration, 1440));
+  }
+
   // 포모도로 세션 시작
   async startSession(userId: string, type: string, duration: number): Promise<PomodoroSession> {
     try {
+      // 활성 공부 세션이 있으면 먼저 종료 처리 (사용자당 활성 공부 세션 1개 원칙)
+      const activeStudySessions = await studyRepository.getActiveSessionsByUser(userId);
+      for (const session of activeStudySessions) {
+        const elapsedMinutes = this.getElapsedMinutesFromStartedAt(session.started_at);
+        await studyRepository.updateSession(session.id, {
+          ended_at: new Date().toISOString(),
+          status: 'ended',
+          total_minutes: elapsedMinutes,
+        });
+      }
+
       // 기존 활성 세션이 있으면 취소 처리
       const activeSession = await pomodoroRepository.getActiveSession(userId);
       if (activeSession) {
         // 이전 공부 세션은 경과 시간만큼 완료 처리, 휴식 세션은 취소
         if (activeSession.type === 'study') {
-          const elapsedMinutes = this.getElapsedMinutes(activeSession);
+          const elapsedMinutes = this.getSafeCompletedDurationMinutes(activeSession);
           await pomodoroRepository.updateSession(activeSession.id, {
             status: 'completed',
             completed_at: new Date().toISOString(),
@@ -39,10 +75,12 @@ class PomodoroService {
         }
       }
 
+      const safeDuration = Math.max(1, Math.min(1440, Math.round(Number(duration) || 1)));
+
       return await pomodoroRepository.createSession({
         userId,
         type,
-        durationMinutes: duration,
+        durationMinutes: safeDuration,
       });
     } catch (error) {
       console.error('Error starting session:', error);
@@ -78,7 +116,7 @@ class PomodoroService {
 
       // 공부 세션은 취소 시점까지의 시간을 공부 시간으로 인정
       if (session.type === 'study') {
-        const elapsedMinutes = this.getElapsedMinutes(session);
+        const elapsedMinutes = this.getSafeCompletedDurationMinutes(session);
         return await pomodoroRepository.updateSession(sessionId, {
           status: 'completed',
           completed_at: new Date().toISOString(),

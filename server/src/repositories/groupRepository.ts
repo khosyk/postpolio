@@ -174,6 +174,11 @@ class GroupRepository {
         .single();
 
       if (error) throw error;
+
+      // 캐시 무효화 및 갱신
+      cacheService.del(cacheKeys.group(groupId));
+      cacheService.set(cacheKeys.group(groupId), data, 300);
+
       return data;
     } catch (error) {
       console.error('Error updating group:', error);
@@ -187,6 +192,9 @@ class GroupRepository {
       const { error } = await supabase.from('study_groups').delete().eq('id', groupId);
 
       if (error) throw error;
+
+      // 캐시 무효화
+      cacheService.del(cacheKeys.group(groupId));
     } catch (error) {
       console.error('Error deleting group:', error);
       throw error;
@@ -196,12 +204,13 @@ class GroupRepository {
   // 그룹 설정 변경
   async updateGroupSettings(
     groupId: string,
-    settings: { chat_enabled?: boolean; check_in_interval?: number }
+    settings: { chat_enabled?: boolean; check_in_interval?: number; check_in_duration_seconds?: number }
   ): Promise<StudyGroup> {
     try {
       const updateData: {
         chat_enabled?: boolean;
         check_in_interval?: number;
+        check_in_duration_seconds?: number;
         updated_at: string;
       } = {
         updated_at: new Date().toISOString(),
@@ -213,6 +222,9 @@ class GroupRepository {
       if (settings.check_in_interval !== undefined) {
         updateData.check_in_interval = settings.check_in_interval;
       }
+      if (settings.check_in_duration_seconds !== undefined) {
+        updateData.check_in_duration_seconds = settings.check_in_duration_seconds;
+      }
 
       const { data, error } = await supabase
         .from('study_groups')
@@ -222,6 +234,11 @@ class GroupRepository {
         .single();
 
       if (error) throw error;
+
+      // 캐시 무효화 및 갱신
+      cacheService.del(cacheKeys.group(groupId));
+      cacheService.set(cacheKeys.group(groupId), data, 300);
+
       return data;
     } catch (error) {
       console.error('Error updating group settings:', error);

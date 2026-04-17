@@ -16,7 +16,7 @@ export interface ClientToServerEvents {
   'study:start': (payload: { groupId: string }) => void;
   'study:stop': (payload: { groupId: string }) => void;
   'study:checkin:request': (payload: { groupId: string }) => void;
-  'study:checkin:submit': (payload: { groupId: string; sessionId: string }) => void;
+  'study:checkin:submit': (payload: { groupId: string; sessionId?: string }) => void;
   'study:status': (payload: { groupId: string }) => void;
 }
 
@@ -41,6 +41,9 @@ export interface ServerToClientEvents {
   'study:checkin:request': (payload: {
     groupId: string;
     checkInInterval: number;
+    checkInDurationSeconds: number;
+    remainingSeconds?: number;
+    activeSessionId?: string;
     activeSessions: string[];
   }) => void;
   'study:checkin:complete': (payload: {

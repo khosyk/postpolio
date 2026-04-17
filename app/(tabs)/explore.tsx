@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -22,8 +20,9 @@ import BlockingLoader from '@/components/BlockingLoader';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { SkeletonGroupCard } from '@/components/Skeleton';
 import { apiFetch, AuthError } from '@/utils/apiClient';
-import { colors, Colors } from '@/constants/colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { colors, getThemeColors } from '@/constants/colors';
+import { useTheme } from '@/contexts/ThemeContext';
+import AppModal from '@/components/AppModal';
 import { connectSocket, disconnectSocket } from '@/utils/socketClient';
 import { serverToClientEvents } from '@/constants/socket';
 import type { Socket } from 'socket.io-client';
@@ -31,25 +30,68 @@ import type { Socket } from 'socket.io-client';
 // 그룹 챗 탭 화면
 const ExploreScreen = () => {
   const { user } = useAuth();
-  const colorScheme = useColorScheme() ?? 'light';
-  const isDark = colorScheme === 'dark';
+  const { isDark } = useTheme();
+  const themeColors = getThemeColors(isDark);
   const router = useRouter();
   const [groups, setGroups] = useState<StudyGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<StudyGroup | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [editingSettings, setEditingSettings] = useState(false);
   const [chatEnabled, setChatEnabled] = useState<boolean | null>(null);
   const [checkInInterval, setCheckInInterval] = useState<number | null>(null);
+  const [checkInDurationSeconds, setCheckInDurationSeconds] = useState<number | null>(null);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDescription, setEditGroupDescription] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSavedModalVisible, setSettingsSavedModalVisible] = useState(false);
+  const [alertModal, setAlertModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    variant?: 'primary' | 'danger';
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'primary',
+  });
+  const [leaving, setLeaving] = useState(false);
+  const [editingSettings, setEditingSettings] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StudyGroup | null>(null);
+  const [leaveConfirmVisible, setLeaveConfirmVisible] = useState(false);
+  const [leaveTarget, setLeaveTarget] = useState<StudyGroup | null>(null);
   const [groupsStudyTime, setGroupsStudyTime] = useState<Map<string, GroupStudyTimeSummary>>(new Map());
   const [loadingStudyTime, setLoadingStudyTime] = useState(false);
 
   const handleCreateGroup = () => {
     router.push('/groups/create');
   };
+
+  const showError = (message: string, title = '오류') => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'danger',
+    });
+  };
+
+  const showInfo = (title: string, message: string) => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'primary',
+    });
+  };
+
+  const closeAlertModal = () =>
+    setAlertModal(prev => ({
+      ...prev,
+      visible: false,
+    }));
 
   // 그룹 멤버 공부시간 조회
   const fetchGroupMembersStudyTime = async (groupId: string): Promise<GroupMemberStudyTime[]> => {
@@ -228,41 +270,70 @@ const ExploreScreen = () => {
     router.push(`/chat/${groupId}`);
   };
 
-  const handleGroupSettings = (group: StudyGroup, event: { stopPropagation: () => void }) => {
-    event.stopPropagation();
-    setSelectedGroup(group);
-    setMenuVisible(true);
-  };
-
-  const handleEditGroup = async () => {
-    if (!selectedGroup) return;
-    setMenuVisible(false);
-    
-    // 그룹 상세 정보 조회
+  const handleEditGroup = async (group: StudyGroup) => {
     try {
-      const data = await apiFetch<{ data?: { group?: { chat_enabled: boolean; check_in_interval: number } } }>(
-        getGroupUrl('DETAIL', selectedGroup.id),
-        {
-          method: 'GET',
-          requireAuth: true,
-        }
-      );
-      
-      if (data.data?.group) {
-        setChatEnabled(data.data.group.chat_enabled);
-        setCheckInInterval(data.data.group.check_in_interval);
+      const data = await apiFetch<{ data?: { group?: StudyGroup } }>(getGroupUrl('DETAIL', group.id), {
+        method: 'GET',
+        requireAuth: true,
+      });
+
+      const fullGroup = data.data?.group;
+      if (fullGroup) {
+        setSelectedGroup(fullGroup);
+        setChatEnabled(fullGroup.chat_enabled);
+        setCheckInInterval(fullGroup.check_in_interval);
+        setCheckInDurationSeconds(fullGroup.check_in_duration_seconds ?? 30);
+        setEditGroupName(fullGroup.name);
+        setEditGroupDescription(fullGroup.description ?? '');
         setEditingSettings(true);
       }
     } catch {
-      Alert.alert('오류', '그룹 정보를 불러올 수 없습니다.');
+      showError('그룹 정보를 불러올 수 없습니다.');
     }
   };
 
   const handleSaveSettings = async () => {
-    if (!selectedGroup || chatEnabled === null || checkInInterval === null) return;
+    if (
+      !selectedGroup ||
+      chatEnabled === null ||
+      checkInInterval === null ||
+      checkInDurationSeconds === null
+    )
+      return;
+
+    const trimmedName = editGroupName.trim();
+    if (!trimmedName) {
+      showError('그룹명을 입력해주세요.');
+      return;
+    }
+    if (checkInDurationSeconds < 10 || checkInDurationSeconds > 300) {
+      showError('체크인 노출 시간은 10~300초 사이로 설정해주세요.');
+      return;
+    }
+
     try {
       setSavingSettings(true);
-      const data = await apiFetch<{
+      // 1) 그룹 기본 정보 업데이트 (이름, 설명)
+      const updateInfo = await apiFetch<{
+        success?: boolean;
+        message?: string;
+        data?: { group: StudyGroup };
+      }>(getGroupUrl('UPDATE', selectedGroup.id), {
+        method: 'PUT',
+        requireAuth: true,
+        body: JSON.stringify({
+          name: trimmedName,
+          description: editGroupDescription.trim() || undefined,
+        }),
+      });
+
+      if (!updateInfo?.success) {
+        showError(updateInfo?.message ?? '그룹 정보 저장 중 오류가 발생했습니다.');
+        return;
+      }
+
+      // 2) 그룹 설정 업데이트 (채팅 허용, 체크인 간격)
+      const settingsResult = await apiFetch<{
         success?: boolean;
         message?: string;
         data?: { group: StudyGroup };
@@ -272,67 +343,95 @@ const ExploreScreen = () => {
         body: JSON.stringify({
           chat_enabled: chatEnabled,
           check_in_interval: checkInInterval,
+          check_in_duration_seconds: checkInDurationSeconds,
         }),
       });
 
-      if (!data?.success) {
-        Alert.alert('오류', data?.message ?? '그룹 설정 저장 중 오류가 발생했습니다.');
+      if (!settingsResult?.success) {
+        showError(settingsResult?.message ?? '그룹 설정 저장 중 오류가 발생했습니다.');
         return;
       }
 
-      if (data.data?.group) {
-        // 그룹 목록 업데이트
-        setGroups(prev => prev.map(g => g.id === selectedGroup.id ? data.data!.group! : g));
+      const updatedGroup = settingsResult.data?.group ?? updateInfo.data?.group;
+      if (updatedGroup && selectedGroup) {
+        setGroups(prev => prev.map(g => (g.id === selectedGroup.id ? updatedGroup : g)));
       }
-      
       setEditingSettings(false);
-      Alert.alert('완료', '그룹 설정이 저장되었습니다.');
+      setChatEnabled(null);
+      setCheckInInterval(null);
+      setCheckInDurationSeconds(null);
+      setSelectedGroup(null);
+      setEditGroupName('');
+      setEditGroupDescription('');
+      setSettingsSavedModalVisible(true);
     } catch (e) {
       if (!(e instanceof AuthError)) {
-        Alert.alert('오류', (e as Error).message ?? '그룹 설정 저장 중 오류가 발생했습니다.');
+        showError((e as Error).message ?? '그룹 설정 저장 중 오류가 발생했습니다.');
       }
     } finally {
       setSavingSettings(false);
     }
   };
 
-  const handleDeleteGroup = () => {
-    if (!selectedGroup) return;
-    Alert.alert('그룹 삭제', '정말 그룹을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.', [
-      { text: '취소', style: 'cancel', onPress: () => setMenuVisible(false) },
-      {
-        text: '삭제',
-        style: 'destructive',
-        onPress: async () => {
-          setMenuVisible(false);
-          setDeleting(true);
-          try {
-            const data = await apiFetch<{ success?: boolean; message?: string }>(
-              getGroupUrl('DELETE', selectedGroup.id),
-              {
-                method: 'DELETE',
-                requireAuth: true,
-              },
-            );
+  const handleDeleteGroup = (group: StudyGroup) => {
+    setDeleteTarget(group);
+    setDeleteConfirmVisible(true);
+  };
 
-            if (!data?.success) {
-              Alert.alert('오류', data?.message ?? '그룹 삭제 중 오류가 발생했습니다.');
-              return;
-            }
+  const confirmDeleteGroup = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const data = await apiFetch<{ success?: boolean; message?: string }>(
+        getGroupUrl('DELETE', deleteTarget.id),
+        { method: 'DELETE', requireAuth: true },
+      );
+      if (!data?.success) {
+        showError(data?.message ?? '그룹 삭제 중 오류가 발생했습니다.');
+        return;
+      }
+      await fetchGroups();
+    } catch (e) {
+      if (!(e instanceof AuthError)) {
+        showError((e as Error).message ?? '그룹 삭제 중 오류가 발생했습니다.');
+      }
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmVisible(false);
+      setDeleteTarget(null);
+      setSelectedGroup(null);
+    }
+  };
 
-            await fetchGroups();
-            Alert.alert('완료', '그룹이 삭제되었습니다.');
-          } catch (e) {
-            if (!(e instanceof AuthError)) {
-              Alert.alert('오류', (e as Error).message ?? '그룹 삭제 중 오류가 발생했습니다.');
-            }
-          } finally {
-            setDeleting(false);
-            setSelectedGroup(null);
-          }
-        },
-      },
-    ]);
+  const handleLeaveGroup = (group: StudyGroup) => {
+    setLeaveTarget(group);
+    setLeaveConfirmVisible(true);
+  };
+
+  const confirmLeaveGroup = async () => {
+    if (!leaveTarget) return;
+    setLeaving(true);
+    try {
+      const data = await apiFetch<{ success?: boolean; message?: string }>(
+        getGroupUrl('LEAVE', leaveTarget.id),
+        { method: 'DELETE', requireAuth: true },
+      );
+      if (!data?.success) {
+        showError(data?.message ?? '그룹 탈퇴 중 오류가 발생했습니다.');
+        return;
+      }
+      await fetchGroups();
+      setSelectedGroup(null);
+      showInfo('완료', '그룹에서 나갔습니다.');
+    } catch (e) {
+      if (!(e instanceof AuthError)) {
+        showError((e as Error).message ?? '그룹 탈퇴 중 오류가 발생했습니다.');
+      }
+    } finally {
+      setLeaving(false);
+      setLeaveConfirmVisible(false);
+      setLeaveTarget(null);
+    }
   };
 
   const isOwner = (group: StudyGroup) => group?.owner_id === user?.id;
@@ -352,11 +451,11 @@ const ExploreScreen = () => {
     group: StudyGroup;
     summary?: GroupStudyTimeSummary;
     onPress: () => void;
-    isDark: boolean;
+    themeColors: ReturnType<typeof getThemeColors>;
   }
 
   // 그룹 공부시간 요약 카드
-  const GroupStudyTimeCard = React.memo<GroupStudyTimeCardProps>(({ group, summary, onPress, isDark }) => {
+  const GroupStudyTimeCard = React.memo<GroupStudyTimeCardProps>(({ group, summary, onPress, themeColors }) => {
     const totalMinutes = summary?.totalMinutes || 0;
     const memberCount = summary?.memberCount || 0;
 
@@ -365,21 +464,21 @@ const ExploreScreen = () => {
         style={[
           styles.studyTimeCard,
           {
-            backgroundColor: isDark ? colors.gray800 : colors.gray50,
-            borderColor: isDark ? colors.gray700 : colors.gray200,
+            backgroundColor: themeColors.cardBackground,
+            borderColor: themeColors.border,
           },
         ]}
         onPress={onPress}
         activeOpacity={0.7}
       >
         <Text
-          style={[styles.studyTimeCardTitle, { color: isDark ? colors.white : colors.textPrimary }]}
+          style={[styles.studyTimeCardTitle, { color: themeColors.textPrimary }]}
           numberOfLines={1}
         >
           {group.name}
         </Text>
         <Text style={styles.studyTimeCardTime}>{formatStudyTime(totalMinutes)}</Text>
-        <Text style={[styles.studyTimeCardMembers, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
+        <Text style={[styles.studyTimeCardMembers, { color: themeColors.textSecondary }]}>
           {memberCount}명
         </Text>
       </TouchableOpacity>
@@ -388,18 +487,18 @@ const ExploreScreen = () => {
 
   return (
     <View
-      style={[styles.container, { backgroundColor: isDark ? Colors.dark.background : colors.background }]}
+      style={[styles.container, { backgroundColor: themeColors.background }]}
     >
       <View
         style={[
           styles.header,
           {
-            backgroundColor: isDark ? Colors.dark.background : colors.white,
-            borderBottomColor: isDark ? colors.gray700 : colors.gray200,
+            backgroundColor: themeColors.cardBackground,
+            borderBottomColor: themeColors.border,
           },
         ]}
       >
-        <Text style={[styles.headerTitle, { color: isDark ? colors.white : colors.textPrimary }]}>
+        <Text style={[styles.headerTitle, { color: themeColors.textPrimary }]}>
           그룹 챗
         </Text>
         <TouchableOpacity style={styles.createButton} onPress={handleCreateGroup}>
@@ -413,12 +512,12 @@ const ExploreScreen = () => {
           style={[
             styles.studyTimeSection,
             {
-              backgroundColor: isDark ? Colors.dark.background : colors.white,
-              borderBottomColor: isDark ? colors.gray700 : colors.gray200,
+              backgroundColor: themeColors.cardBackground,
+              borderBottomColor: themeColors.border,
             },
           ]}
         >
-          <Text style={[styles.studyTimeSectionTitle, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
+          <Text style={[styles.studyTimeSectionTitle, { color: themeColors.textSecondary }]}>
             오늘의 공부시간
           </Text>
           {loadingStudyTime ? (
@@ -437,7 +536,7 @@ const ExploreScreen = () => {
                     group={group}
                     summary={summary}
                     onPress={() => handleGroupPress(group.id)}
-                    isDark={isDark}
+                    themeColors={themeColors}
                   />
                 );
               })}
@@ -454,10 +553,10 @@ const ExploreScreen = () => {
         </View>
       ) : groups.length === 0 ? (
         <View style={styles.emptyContainer}>
-              <Text style={[styles.emptyText, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
+              <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
                 그룹 없음
               </Text>
-              <Text style={[styles.emptySubText, { color: isDark ? colors.gray400 : colors.textTertiary }]}>
+              <Text style={[styles.emptySubText, { color: themeColors.textTertiary }]}>
                 새로 생성하기
               </Text>
           <TouchableOpacity style={styles.emptyCreateButton} onPress={handleCreateGroup}>
@@ -472,7 +571,7 @@ const ExploreScreen = () => {
             <View
               style={[
                 styles.groupCard,
-                { backgroundColor: isDark ? colors.gray800 : colors.white },
+                { backgroundColor: themeColors.cardBackground },
               ]}
             >
               <TouchableOpacity
@@ -481,33 +580,50 @@ const ExploreScreen = () => {
                 activeOpacity={0.7}
               >
                 <View style={styles.groupCardInfo}>
-                  <Text style={[styles.groupName, { color: isDark ? colors.white : colors.textPrimary }]}>
+                  <Text style={[styles.groupName, { color: themeColors.textPrimary }]}>
                     {item.name}
                   </Text>
                   {item.description ? (
                     <Text
-                      style={[styles.groupDescription, { color: isDark ? colors.gray300 : colors.textSecondary }]}
+                      style={[styles.groupDescription, { color: themeColors.textSecondary }]}
                       numberOfLines={2}
                     >
                       {item.description}
                     </Text>
                   ) : null}
-                  <Text style={[styles.groupDate, { color: isDark ? colors.gray400 : colors.textTertiary }]}>
+                  <Text style={[styles.groupDate, { color: themeColors.textTertiary }]}>
                     {new Date(item.created_at).toLocaleDateString('ko-KR')}
                   </Text>
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.settingsButton}
-                onPress={e => handleGroupSettings(item, e)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <IconSymbol
-                  name='more-vert'
-                  size={20}
-                  color={isDark ? colors.gray300 : colors.textSecondary}
-                />
-              </TouchableOpacity>
+              <View style={styles.cardActions}>
+                {isOwner(item) && (
+                  <TouchableOpacity
+                    style={styles.smallActionButton}
+                    onPress={() => handleEditGroup(item)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <IconSymbol
+                      name='edit'
+                      size={18}
+                      color={themeColors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.smallActionButton}
+                  onPress={() => (isOwner(item) ? handleDeleteGroup(item) : handleLeaveGroup(item))}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <IconSymbol
+                    name={isOwner(item) ? 'delete' : 'logout'}
+                    size={18}
+                    color={colors.red500}
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
           )}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
@@ -515,158 +631,238 @@ const ExploreScreen = () => {
         />
       )}
 
-      {/* 그룹 설정 메뉴 모달 */}
-      <Modal
-        transparent
-        visible={menuVisible}
-        animationType='fade'
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <Pressable style={styles.backdrop} onPress={() => setMenuVisible(false)}>
-          <View
-            style={[styles.menuContainer, { backgroundColor: isDark ? colors.gray800 : colors.white }]}
-          >
-            <Text style={[styles.menuTitle, { color: isDark ? colors.white : colors.textPrimary }]}>
-              {selectedGroup?.name}
-            </Text>
-            {isOwner(selectedGroup!) ? (
-              <>
-                <TouchableOpacity style={styles.menuItem} onPress={handleEditGroup}>
-                  <Text style={[styles.menuItemText, { color: isDark ? colors.white : colors.textPrimary }]}>
-                    그룹 편집
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.menuItem} onPress={handleDeleteGroup}>
-                  <Text style={[styles.menuItemText, styles.deleteText]}>그룹 삭제</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <Text style={[styles.menuSubtitle, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
-                소유자만 편집/삭제할 수 있습니다.
-              </Text>
-            )}
-          </View>
-        </Pressable>
-      </Modal>
-
-      {/* 그룹 설정 편집 모달 */}
-      <Modal
-        transparent
+      {/* 그룹 설정 편집 모달 (표준 AppModal) */}
+      <AppModal
         visible={editingSettings}
-        animationType='slide'
         onRequestClose={() => {
           setEditingSettings(false);
+          setSelectedGroup(null);
+          setEditGroupName('');
+          setEditGroupDescription('');
           setChatEnabled(null);
           setCheckInInterval(null);
+          setCheckInDurationSeconds(null);
         }}
-      >
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => {
-            setEditingSettings(false);
-            setChatEnabled(null);
-            setCheckInInterval(null);
-          }}
-        >
-          <Pressable onPress={e => e.stopPropagation()}>
-            <View
-              style={[
-                styles.settingsModalContainer,
-                { backgroundColor: isDark ? colors.gray800 : colors.white },
-              ]}
-            >
-              <Text style={[styles.settingsModalTitle, { color: isDark ? colors.white : colors.textPrimary }]}>
-                그룹 설정
+        title='그룹 설정'
+        subtitle={selectedGroup?.name}
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='저장'
+        cancelText='취소'
+        onConfirm={handleSaveSettings}
+        onCancel={() => {
+          setEditingSettings(false);
+          setSelectedGroup(null);
+          setEditGroupName('');
+          setEditGroupDescription('');
+          setChatEnabled(null);
+          setCheckInInterval(null);
+          setCheckInDurationSeconds(null);
+        }}
+        confirmDisabled={
+          savingSettings ||
+          chatEnabled === null ||
+          checkInInterval === null ||
+          checkInDurationSeconds === null ||
+          !editGroupName.trim()
+        }
+        content={
+          <View style={styles.settingsSection}>
+            {/* 그룹 기본 정보 */}
+            <View style={[styles.settingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>
+                그룹명
               </Text>
-              <Text style={[styles.settingsModalSubtitle, { color: isDark ? colors.gray300 : colors.textSecondary }]}>
-                {selectedGroup?.name}
-              </Text>
-
-              <View style={styles.settingsSection}>
-                <View
-                  style={[
-                    styles.settingRow,
-                    { borderBottomColor: isDark ? colors.gray700 : colors.gray200 },
-                  ]}
-                >
-                  <Text style={[styles.settingLabel, { color: isDark ? colors.white : colors.textPrimary }]}>
-                    채팅 허용
-                  </Text>
-                  <Switch
-                    value={chatEnabled ?? false}
-                    onValueChange={setChatEnabled}
-                    trackColor={{ false: isDark ? colors.gray700 : '#D1D5DB', true: colors.blue500 }}
-                    thumbColor='#FFFFFF'
-                  />
-                </View>
-
-                <View
-                  style={[
-                    styles.settingRow,
-                    { borderBottomColor: isDark ? colors.gray700 : colors.gray200 },
-                  ]}
-                >
-                  <Text style={[styles.settingLabel, { color: isDark ? colors.white : colors.textPrimary }]}>
-                    체크인 간격 (분)
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.intervalInput,
-                      {
-                        backgroundColor: isDark ? colors.gray900 : colors.white,
-                        borderColor: isDark ? colors.gray700 : '#D1D5DB',
-                        color: isDark ? colors.white : colors.textPrimary,
-                      },
-                    ]}
-                    value={checkInInterval?.toString() ?? ''}
-                    onChangeText={text => {
-                      const num = parseInt(text, 10);
-                      if (!isNaN(num) && num > 0) {
-                        setCheckInInterval(num);
-                      } else if (text === '') {
-                        setCheckInInterval(null);
-                      }
-                    }}
-                    keyboardType='number-pad'
-                    placeholder='30'
-                    placeholderTextColor={isDark ? colors.gray400 : colors.textTertiary}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.settingsModalActions}>
-                <TouchableOpacity
-                  style={[
-                    styles.settingsModalButton,
-                    styles.cancelButton,
-                    { backgroundColor: isDark ? colors.gray700 : '#F3F4F6' },
-                  ]}
-                  onPress={() => {
-                    setEditingSettings(false);
-                    setChatEnabled(null);
-                    setCheckInInterval(null);
-                  }}
-                >
-                  <Text
-                    style={[styles.cancelButtonText, { color: isDark ? colors.gray300 : colors.textSecondary }]}
-                  >
-                    취소
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.settingsModalButton, styles.saveButton]}
-                  onPress={handleSaveSettings}
-                  disabled={savingSettings || chatEnabled === null || checkInInterval === null}
-                >
-                  <Text style={styles.saveButtonText}>저장</Text>
-                </TouchableOpacity>
-              </View>
             </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+            <TextInput
+              style={[
+                styles.groupNameInput,
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: themeColors.border,
+                  color: themeColors.textPrimary,
+                },
+              ]}
+              value={editGroupName}
+              onChangeText={setEditGroupName}
+              placeholder='그룹명을 입력하세요'
+              placeholderTextColor={themeColors.textTertiary}
+              maxLength={100}
+            />
 
-      <BlockingLoader visible={deleting || savingSettings} message={deleting ? '그룹 삭제 중...' : '설정 저장 중...'} />
+            <View style={[styles.settingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>
+                설명
+              </Text>
+            </View>
+            <TextInput
+              style={[
+                styles.groupDescriptionInput,
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: themeColors.border,
+                  color: themeColors.textPrimary,
+                },
+              ]}
+              value={editGroupDescription}
+              onChangeText={setEditGroupDescription}
+              placeholder='그룹 설명을 입력하세요 (선택)'
+              placeholderTextColor={themeColors.textTertiary}
+              multiline
+              maxLength={500}
+            />
+
+            {/* 그룹 설정 */}
+            <View style={[styles.settingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>
+                채팅 허용
+              </Text>
+              <Switch
+                value={chatEnabled ?? false}
+                onValueChange={setChatEnabled}
+                trackColor={{ false: themeColors.borderSecondary, true: colors.blue500 }}
+                thumbColor='#FFFFFF'
+              />
+            </View>
+            <View style={[styles.settingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>
+                체크인 간격 (분)
+              </Text>
+              <TextInput
+                style={[
+                  styles.intervalInput,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                    color: themeColors.textPrimary,
+                  },
+                ]}
+                value={checkInInterval?.toString() ?? ''}
+                onChangeText={text => {
+                  const num = parseInt(text, 10);
+                  if (!isNaN(num) && num > 0) setCheckInInterval(num);
+                  else if (text === '') setCheckInInterval(null);
+                }}
+                keyboardType='number-pad'
+                placeholder='30'
+                placeholderTextColor={themeColors.textTertiary}
+              />
+            </View>
+            <View style={[styles.settingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.settingLabel, { color: themeColors.textPrimary }]}>
+                체크인 노출 시간 (초)
+              </Text>
+              <TextInput
+                style={[
+                  styles.intervalInput,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                    color: themeColors.textPrimary,
+                  },
+                ]}
+                value={checkInDurationSeconds?.toString() ?? ''}
+                onChangeText={text => {
+                  const num = parseInt(text, 10);
+                  if (!isNaN(num) && num > 0) setCheckInDurationSeconds(num);
+                  else if (text === '') setCheckInDurationSeconds(null);
+                }}
+                keyboardType='number-pad'
+                placeholder='30'
+                placeholderTextColor={themeColors.textTertiary}
+              />
+            </View>
+          </View>
+        }
+      />
+
+      {/* 그룹 설정 저장 완료 모달 */}
+      <AppModal
+        visible={settingsSavedModalVisible}
+        onRequestClose={() => setSettingsSavedModalVisible(false)}
+        title='저장되었습니다.'
+        subtitle='그룹 설정이 저장되었습니다.'
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        onConfirm={() => setSettingsSavedModalVisible(false)}
+      />
+
+      {/* 그룹 삭제 확인 모달 (중앙 알림 모달 규격) */}
+      <AppModal
+        visible={deleteConfirmVisible}
+        onRequestClose={() => {
+          if (deleting) return;
+          setDeleteConfirmVisible(false);
+          setDeleteTarget(null);
+        }}
+        title={deleteTarget ? `\"${deleteTarget.name}\" 그룹 삭제` : '그룹 삭제'}
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='삭제'
+        cancelText='취소'
+        confirmVariant='danger'
+        onConfirm={confirmDeleteGroup}
+        onCancel={() => {
+          if (deleting) return;
+          setDeleteConfirmVisible(false);
+          setDeleteTarget(null);
+        }}
+        confirmDisabled={deleting}
+        content={
+          <Text
+            style={{
+              fontSize: 14,
+              color: themeColors.textSecondary,
+              textAlign: 'center',
+            }}
+          >
+            정말 이 그룹을 삭제하시겠습니까?{'\n'}이 작업은 되돌릴 수 없습니다.
+          </Text>
+        }
+      />
+
+      <BlockingLoader
+        visible={deleting || savingSettings || leaving}
+        message={deleting ? '그룹 삭제 중...' : leaving ? '그룹 탈퇴 중...' : '설정 저장 중...'}
+      />
+
+      {/* 그룹 탈퇴 확인 모달 */}
+      <AppModal
+        visible={leaveConfirmVisible}
+        onRequestClose={() => {
+          if (leaving) return;
+          setLeaveConfirmVisible(false);
+          setLeaveTarget(null);
+        }}
+        title='그룹 탈퇴'
+        subtitle={leaveTarget ? `"${leaveTarget.name}" 그룹에서 나가시겠습니까?` : '그룹에서 나가시겠습니까?'}
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='나가기'
+        cancelText='취소'
+        confirmVariant='danger'
+        onConfirm={confirmLeaveGroup}
+        onCancel={() => {
+          if (leaving) return;
+          setLeaveConfirmVisible(false);
+          setLeaveTarget(null);
+        }}
+        confirmDisabled={leaving}
+      />
+
+      {/* 공통 오류/알림 모달 */}
+      <AppModal
+        visible={alertModal.visible}
+        onRequestClose={closeAlertModal}
+        title={alertModal.title}
+        subtitle={alertModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={alertModal.variant === 'danger' ? 'danger' : 'primary'}
+        onConfirm={closeAlertModal}
+      />
     </View>
   );
 };
@@ -711,10 +907,10 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   groupCardContent: {
     flex: 1,
@@ -724,8 +920,10 @@ const styles = StyleSheet.create({
   groupCardInfo: {
     flex: 1,
   },
-  settingsButton: {
-    padding: 8,
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginLeft: 8,
   },
   groupName: {
@@ -771,64 +969,45 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+  smallActionButton: {
+    minHeight: 32,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  menuContainer: {
-    width: 280,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  menuTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  menuSubtitle: {
+  smallActionText: {
     fontSize: 13,
-    marginTop: 8,
+    fontWeight: '600',
   },
-  menuItem: {
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  menuItemText: {
-    fontSize: 14,
-  },
-  deleteText: {
+  smallActionDanger: {
     color: '#DC2626',
-  },
-  settingsModalContainer: {
-    width: '90%',
-    maxWidth: 400,
-    borderRadius: 16,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  settingsModalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  settingsModalSubtitle: {
-    fontSize: 14,
-    marginBottom: 24,
   },
   settingsSection: {
     marginBottom: 24,
+  },
+  groupNameInput: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 16,
+  },
+  groupDescriptionInput: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 14,
+    textAlignVertical: 'top',
+    minHeight: 80,
   },
   settingRow: {
     flexDirection: 'row',

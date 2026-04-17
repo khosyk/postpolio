@@ -9,16 +9,18 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ActivityIndicator,
   Modal,
   Pressable,
   Animated,
+  Switch,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { Socket } from 'socket.io-client';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connectSocket, disconnectSocket } from '@/utils/socketClient';
 import { clientToServerEvents, serverToClientEvents } from '@/constants/socket';
 import { useAuth } from '@/contexts/AuthContext';
@@ -28,12 +30,13 @@ import { apiFetch } from '@/utils/apiClient';
 import RankingChip from '@/components/RankingChip';
 import CheckInButton from '@/components/CheckInButton';
 import MinutePicker from '@/components/MinutePicker';
-import CircularProgress from '@/components/CircularProgress';
 import { RankingEntry } from '@/types/group';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { colors, getThemeColors } from '@/constants/colors';
-import { PomodoroSession, PomodoroSettings } from '@/types/pomodoro';
+import { PomodoroSettings } from '@/types/pomodoro';
 import { useTheme } from '@/contexts/ThemeContext';
+import AppModal from '@/components/AppModal';
+import { storageKeys } from '@/constants/storage';
 
 interface Message {
   id: string;
@@ -45,8 +48,6 @@ interface Message {
   type?: 'message' | 'system';
 }
 
-const STORAGE_KEY = 'pomodoro_session';
-
 const ChatRoomScreen = () => {
   const { groupId } = useLocalSearchParams<{ groupId: string }>();
   const router = useRouter();
@@ -55,6 +56,25 @@ const ChatRoomScreen = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
   const [group, setGroup] = useState<StudyGroup | null>(null);
+  const [editingGroup, setEditingGroup] = useState(false);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDescription, setEditGroupDescription] = useState('');
+  const [editChatEnabled, setEditChatEnabled] = useState<boolean | null>(null);
+  const [editCheckInInterval, setEditCheckInInterval] = useState<number | null>(null);
+  const [editCheckInDurationSeconds, setEditCheckInDurationSeconds] = useState<number | null>(null);
+  const [savingGroupSettings, setSavingGroupSettings] = useState(false);
+  const [groupSettingsSavedModalVisible, setGroupSettingsSavedModalVisible] = useState(false);
+  const [alertModal, setAlertModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    variant?: 'primary' | 'danger';
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'primary',
+  });
 
   // Stack 네비게이션 헤더 숨기기
   useLayoutEffect(() => {
@@ -74,7 +94,6 @@ const ChatRoomScreen = () => {
   const [todayMinutes, setTodayMinutes] = useState(0);
   const [checkInInterval, setCheckInInterval] = useState(30);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings | null>(null);
-  const [pomodoroSessionId, setPomodoroSessionId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [tempSettings, setTempSettings] = useState<PomodoroSettings>({
     study_duration: 25,
@@ -89,6 +108,193 @@ const ChatRoomScreen = () => {
   const currentGroupIdRef = useRef<string | null>(null);
   const eventHandlersRef = useRef<Map<string, (...args: any[]) => void>>(new Map());
   const modalOpacity = useRef(new Animated.Value(0)).current;
+  const checkInDeadlineRef = useRef<number | null>(null);
+  const activeCheckInSessionIdRef = useRef<string | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
+  const isOwner = group && user ? group.owner_id === user.id : false;
+
+  const dismissCheckInUi = useCallback(
+    async (clearStorage: boolean) => {
+      setCheckInVisible(false);
+      setCheckInTimeRemaining(0);
+      checkInDeadlineRef.current = null;
+      activeCheckInSessionIdRef.current = null;
+      if (groupId) {
+        const notifId = `checkin-${groupId}`;
+        try {
+          await Notifications.cancelScheduledNotificationAsync(notifId);
+        } catch {
+          // 알림 취소 실패는 무시
+        }
+        if (clearStorage) {
+          try {
+            await AsyncStorage.removeItem(storageKeys.group.checkInPending(groupId));
+          } catch {
+            // 무시
+          }
+        }
+      }
+    },
+    [groupId],
+  );
+
+  const persistCheckInPending = useCallback(
+    async (deadlineMs: number, sessionId: string | undefined, intervalMinutes: number) => {
+      if (!groupId) return;
+      try {
+        await AsyncStorage.setItem(
+          storageKeys.group.checkInPending(groupId),
+          JSON.stringify({
+            deadlineMs,
+            sessionId,
+            checkInInterval: intervalMinutes,
+          }),
+        );
+      } catch {
+        // 무시
+      }
+    },
+    [groupId],
+  );
+
+  const scheduleCheckInNotification = useCallback(async (remainingSeconds: number) => {
+    if (!groupId) return;
+    const notifId = `checkin-${groupId}`;
+    const sec = Math.max(1, Math.min(remainingSeconds, 3600));
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notifId);
+      await Notifications.scheduleNotificationAsync({
+        identifier: notifId,
+        content: {
+          title: '체크인',
+          body: '공부 증명 체크인을 해주세요.',
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: sec,
+          repeats: false,
+        },
+      });
+    } catch {
+      // 로컬 알림 실패는 무시 (Expo Go/권한 제한 등)
+    }
+  }, [groupId]);
+
+  const showError = (message: string, title = '오류') => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'danger',
+    });
+  };
+
+  const showInfo = (title: string, message: string) => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'primary',
+    });
+  };
+
+  const closeAlertModal = () =>
+    setAlertModal(prev => ({
+      ...prev,
+      visible: false,
+    }));
+
+  const handleOpenGroupEdit = useCallback(() => {
+    if (!group) return;
+    setEditGroupName(group.name);
+    setEditGroupDescription(group.description ?? '');
+    setEditChatEnabled(group.chat_enabled);
+    setEditCheckInInterval(group.check_in_interval);
+    setEditCheckInDurationSeconds(group.check_in_duration_seconds ?? 30);
+    setEditingGroup(true);
+  }, [group]);
+
+  const handleSaveGroupEdit = useCallback(async () => {
+    if (
+      !group ||
+      editChatEnabled === null ||
+      editCheckInInterval === null ||
+      editCheckInDurationSeconds === null
+    )
+      return;
+
+    const trimmedName = editGroupName.trim();
+    if (!trimmedName) {
+      showError('그룹명을 입력해주세요.');
+      return;
+    }
+    if (editCheckInDurationSeconds < 10 || editCheckInDurationSeconds > 300) {
+      showError('체크인 노출 시간은 10~300초 사이로 설정해주세요.');
+      return;
+    }
+
+    try {
+      setSavingGroupSettings(true);
+
+      const updateInfo = await apiFetch<{
+        success?: boolean;
+        message?: string;
+        data?: { group: StudyGroup };
+      }>(getGroupUrl('UPDATE', group.id), {
+        method: 'PUT',
+        requireAuth: true,
+        body: JSON.stringify({
+          name: trimmedName,
+          description: editGroupDescription.trim() || undefined,
+        }),
+      });
+
+      if (!updateInfo?.success) {
+        showError(updateInfo?.message ?? '그룹 정보 저장 중 오류가 발생했습니다.');
+        return;
+      }
+
+      const settingsResult = await apiFetch<{
+        success?: boolean;
+        message?: string;
+        data?: { group: StudyGroup };
+      }>(getGroupUrl('SETTINGS', group.id), {
+        method: 'PUT',
+        requireAuth: true,
+        body: JSON.stringify({
+          chat_enabled: editChatEnabled,
+          check_in_interval: editCheckInInterval,
+          check_in_duration_seconds: editCheckInDurationSeconds,
+        }),
+      });
+
+      if (!settingsResult?.success) {
+        showError(settingsResult?.message ?? '그룹 설정 저장 중 오류가 발생했습니다.');
+        return;
+      }
+
+      const updatedGroup = settingsResult.data?.group ?? updateInfo.data?.group;
+      if (updatedGroup) {
+        setGroup(updatedGroup);
+        setCheckInInterval(updatedGroup.check_in_interval);
+      }
+
+      setEditingGroup(false);
+      setGroupSettingsSavedModalVisible(true);
+    } catch (e) {
+      showError((e as Error).message ?? '그룹 정보 저장 중 오류가 발생했습니다.');
+    } finally {
+      setSavingGroupSettings(false);
+    }
+  }, [
+    group,
+    editChatEnabled,
+    editCheckInInterval,
+    editCheckInDurationSeconds,
+    editGroupName,
+    editGroupDescription,
+  ]);
 
   // 그룹 정보 조회
   useEffect(() => {
@@ -104,11 +310,17 @@ const ChatRoomScreen = () => {
           },
         );
         if (data.data?.group) {
-          setGroup(data.data.group);
-          setCheckInInterval(data.data.group.check_in_interval);
+          const g = data.data.group;
+          setGroup(g);
+          setCheckInInterval(g.check_in_interval);
+          setEditGroupName(g.name);
+          setEditGroupDescription(g.description ?? '');
+          setEditChatEnabled(g.chat_enabled);
+          setEditCheckInInterval(g.check_in_interval);
+          setEditCheckInDurationSeconds(g.check_in_duration_seconds ?? 30);
         }
       } catch {
-        Alert.alert('오류', '그룹 정보를 불러올 수 없습니다.');
+        showError('그룹 정보를 불러올 수 없습니다.');
         router.back();
       }
     };
@@ -219,15 +431,33 @@ const ChatRoomScreen = () => {
           groupId: string;
           checkInInterval: number;
           activeSessions: string[];
+          checkInDurationSeconds?: number;
+          remainingSeconds?: number;
+          activeSessionId?: string;
         }) => {
-          if (!isMounted) return;
+          if (!isMounted || payload.groupId !== groupId) return;
+          const remaining = Math.max(
+            1,
+            payload.remainingSeconds ?? payload.checkInDurationSeconds ?? 30,
+          );
+          const deadlineMs = Date.now() + remaining * 1000;
+          checkInDeadlineRef.current = deadlineMs;
+          activeCheckInSessionIdRef.current = payload.activeSessionId ?? null;
+          setCheckInInterval(payload.checkInInterval);
+          setCheckInTimeRemaining(remaining);
           setCheckInVisible(true);
-          setCheckInTimeRemaining(payload.checkInInterval * 60);
+          void persistCheckInPending(deadlineMs, payload.activeSessionId, payload.checkInInterval);
+          void scheduleCheckInNotification(remaining);
         };
 
-        const handleCheckInComplete = () => {
-          if (!isMounted) return;
-          setCheckInVisible(false);
+        const handleCheckInComplete = (payload: {
+          groupId: string;
+          userId: string;
+          sessionId?: string;
+          isValid?: boolean;
+        }) => {
+          if (!isMounted || payload.groupId !== groupId || payload.userId !== user.id) return;
+          void dismissCheckInUi(true);
         };
 
         const handleRankingUpdate = (payload: { groupId: string; ranking: RankingEntry[] }) => {
@@ -239,9 +469,33 @@ const ChatRoomScreen = () => {
           groupId: string;
           userId: string;
           totalMinutes: number;
+          hasActiveSession?: boolean;
+          activeSessionStartedAt?: string | null;
         }) => {
-          if (!isMounted || payload.userId !== user.id) return;
-            setTodayMinutes(payload.totalMinutes);
+          if (!isMounted || payload.groupId !== groupId || payload.userId !== user.id) return;
+          setTodayMinutes(payload.totalMinutes);
+
+          // 재진입 시 서버 권위 상태(study_sessions active 여부)로 복원
+          if (payload.hasActiveSession) {
+            setIsStudyActive(true);
+            setCurrentSessionType('study');
+
+            if (payload.activeSessionStartedAt) {
+              const startedAtMs = new Date(payload.activeSessionStartedAt).getTime();
+              if (Number.isFinite(startedAtMs)) {
+                const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+                setElapsedSeconds(elapsed);
+              }
+            }
+            return;
+          }
+
+          if (payload.hasActiveSession === false) {
+            setIsStudyActive(false);
+            setCurrentSessionType('study');
+            setElapsedSeconds(0);
+            void dismissCheckInUi(true);
+          }
         };
 
         // 입장 완료 이벤트 핸들러
@@ -323,8 +577,8 @@ const ChatRoomScreen = () => {
       } catch (error) {
         console.error('Socket connection error:', error);
         if (isMounted) {
-        Alert.alert('오류', '채팅방 연결에 실패했습니다.');
-        setIsLoadingMessages(false);
+          showError('채팅방 연결에 실패했습니다.');
+          setIsLoadingMessages(false);
         }
       }
     };
@@ -332,8 +586,8 @@ const ChatRoomScreen = () => {
     initSocket().catch(error => {
       console.error('Failed to initialize socket:', error);
       if (isMounted) {
-      Alert.alert('오류', '채팅방 연결에 실패했습니다.');
-      setIsLoadingMessages(false);
+        showError('채팅방 연결에 실패했습니다.');
+        setIsLoadingMessages(false);
       }
     });
 
@@ -356,7 +610,60 @@ const ChatRoomScreen = () => {
         currentGroupIdRef.current = null;
       }
     };
-  }, [groupId, user]);
+  }, [groupId, user, dismissCheckInUi, persistCheckInPending, scheduleCheckInNotification]);
+
+  // 앱이 백그라운드에서 돌아올 때 체크인 남은 시간을 마감 시각 기준으로 동기화
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        const deadline = checkInDeadlineRef.current;
+        if (deadline && checkInVisible) {
+          const left = Math.floor((deadline - Date.now()) / 1000);
+          if (left <= 0) {
+            void dismissCheckInUi(true);
+          } else {
+            setCheckInTimeRemaining(left);
+          }
+        }
+      }
+      appStateRef.current = next;
+    });
+    return () => sub.remove();
+  }, [checkInVisible, dismissCheckInUi]);
+
+  // 앱 재시작 후 체크인 창이 열려 있었다면 복원 (서버 study:status와 함께 동작)
+  useEffect(() => {
+    if (!groupId || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(storageKeys.group.checkInPending(groupId));
+        if (!raw || cancelled) return;
+        const parsed = JSON.parse(raw) as {
+          deadlineMs?: number;
+          sessionId?: string;
+          checkInInterval?: number;
+        };
+        const deadlineMs = parsed.deadlineMs;
+        if (!deadlineMs || deadlineMs <= Date.now()) {
+          await AsyncStorage.removeItem(storageKeys.group.checkInPending(groupId));
+          return;
+        }
+        checkInDeadlineRef.current = deadlineMs;
+        activeCheckInSessionIdRef.current = parsed.sessionId ?? null;
+        if (typeof parsed.checkInInterval === 'number') {
+          setCheckInInterval(parsed.checkInInterval);
+        }
+        setCheckInTimeRemaining(Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)));
+        setCheckInVisible(true);
+      } catch {
+        // 무시
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId, user?.id]);
 
   // 타이머 업데이트 (포모도로 설정 기반)
   useEffect(() => {
@@ -373,19 +680,19 @@ const ChatRoomScreen = () => {
         ? pomodoroSettings.study_duration
         : pomodoroSettings.break_duration;
 
-      elapsedTimerRef.current = setInterval(() => {
-        setElapsedSeconds(prev => {
-          const newValue = prev + 1;
+    elapsedTimerRef.current = setInterval(() => {
+      setElapsedSeconds(prev => {
+        const newValue = prev + 1;
         if (newValue >= duration * 60) {
           // 세션 완료 - 자동 전환
           const nextType = currentSessionType === 'study' ? 'break' : 'study';
           setCurrentSessionType(nextType);
           setElapsedSeconds(0);
-            return 0;
-          }
-          return newValue;
-        });
-      }, 1000);
+          return 0;
+        }
+        return newValue;
+      });
+    }, 1000);
 
     return () => {
       if (elapsedTimerRef.current) {
@@ -394,22 +701,25 @@ const ChatRoomScreen = () => {
     };
   }, [isStudyActive, currentSessionType, pomodoroSettings]);
 
-  // 체크인 타이머
+  // 체크인 타이머 (마감 시각 기준 — 백그라운드에서도 남은 시간이 맞게 감소)
   useEffect(() => {
-    if (checkInVisible && checkInTimeRemaining > 0) {
-      const timer = setInterval(() => {
-        setCheckInTimeRemaining(prev => {
-          if (prev <= 1) {
-            setCheckInVisible(false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    if (!checkInVisible || !checkInDeadlineRef.current) return;
 
-      return () => clearInterval(timer);
-    }
-  }, [checkInVisible, checkInTimeRemaining]);
+    const tick = () => {
+      const deadline = checkInDeadlineRef.current;
+      if (!deadline) return;
+      const left = Math.floor((deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        void dismissCheckInUi(true);
+        return;
+      }
+      setCheckInTimeRemaining(left);
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [checkInVisible, dismissCheckInUi]);
 
   // 메시지 전송
   const handleSendMessage = useCallback(() => {
@@ -465,8 +775,6 @@ const ChatRoomScreen = () => {
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
   };
 
-  const effectiveTimerDuration = pomodoroSettings?.study_duration ?? checkInInterval;
-
   // 포모도로 설정 저장
   const handleSaveSettings = useCallback(async () => {
     try {
@@ -478,9 +786,9 @@ const ChatRoomScreen = () => {
       });
       setPomodoroSettings(tempSettings);
       setShowSettings(false);
-      Alert.alert('완료', '설정이 저장되었습니다.');
+      showInfo('완료', '설정이 저장되었습니다.');
     } catch (e) {
-      Alert.alert('오류', (e as Error).message ?? '설정 저장 중 오류가 발생했습니다.');
+      showError((e as Error).message ?? '설정 저장 중 오류가 발생했습니다.');
     } finally {
       setSavingSettings(false);
     }
@@ -558,56 +866,39 @@ const ChatRoomScreen = () => {
     return derivedRanking.filter(entry => entry.userId !== user.id);
   }, [derivedRanking, user]);
 
-  // 게이지 진행률 계산 (오늘 공부 시간 기준, 최대 8시간 = 480분)
-  const getProgress = useMemo(() => {
-    const maxMinutes = 480; // 8시간
-    return Math.min(todayMinutes / maxMinutes, 1);
-  }, [todayMinutes]);
+  // 현재 세션 진행률 (버튼 내부 왼쪽 -> 오른쪽 채움)
+  const sessionProgress = useMemo(() => {
+    if (!pomodoroSettings || !isStudyActive) return 0;
+    const rawDuration =
+      currentSessionType === 'study'
+        ? pomodoroSettings.study_duration
+        : pomodoroSettings.break_duration;
+    const durationMinutes = Math.max(1, Math.min(1440, Math.round(Number(rawDuration) || 1)));
+    const totalSeconds = Math.max(durationMinutes * 60, 1);
+    return Math.max(0, Math.min(elapsedSeconds / totalSeconds, 1));
+  }, [pomodoroSettings, isStudyActive, currentSessionType, elapsedSeconds]);
 
-  // 게이지 색상 (공부 중이면 파란색, 휴식 중이면 초록색, 비활성화면 회색)
-  const getGaugeColor = () => {
-    if (!isStudyActive) return colors.gray400;
-    return currentSessionType === 'study' ? colors.blue500 : colors.green500;
-  };
+  // 버튼 채움 색: 진행률에 따라 공부(파랑) -> 휴식(초록) -> 공부(파랑) 그라데이션
+  const progressFillColor = useMemo(() => {
+    const lerp = (start: number, end: number, t: number) => Math.round(start + (end - start) * t);
+    const clamp = (v: number) => Math.max(0, Math.min(1, v));
+
+    const blue = { r: 59, g: 130, b: 246 }; // #3B82F6
+    const green = { r: 16, g: 185, b: 129 }; // #10B981
+
+    const p = clamp(sessionProgress);
+    if (p <= 0.5) {
+      const t = p / 0.5;
+      return `rgb(${lerp(blue.r, green.r, t)}, ${lerp(blue.g, green.g, t)}, ${lerp(blue.b, green.b, t)})`;
+    }
+
+    const t = (p - 0.5) / 0.5;
+    return `rgb(${lerp(green.r, blue.r, t)}, ${lerp(green.g, blue.g, t)}, ${lerp(green.b, blue.b, t)})`;
+  }, [sessionProgress]);
 
   // 공부 시작
   const handleStartStudy = useCallback(async () => {
     if (!socket || !groupId || !user) return;
-
-    try {
-      // 포모도로 세션도 함께 생성하여 통계/포모도로 탭과 공유
-      const duration = effectiveTimerDuration;
-      const data = await apiFetch<{ data?: { session?: PomodoroSession } }>(
-        getApiUrl('/api/pomodoro/sessions'),
-        {
-          method: 'POST',
-          requireAuth: true,
-          body: JSON.stringify({
-            type: 'study',
-            duration_minutes: duration,
-          }),
-        },
-      );
-
-      const newSession = data.data?.session;
-      if (newSession) {
-        setPomodoroSessionId(newSession.id);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            sessionId: newSession.id,
-            startTime: Date.now(),
-            duration: duration * 60,
-            type: 'study',
-            isTest: false,
-          }),
-        );
-      }
-    } catch (e) {
-      // 세션 생성 실패는 채팅방 공부 흐름을 막지 않음
-      // eslint-disable-next-line no-console
-      console.error('Error starting shared pomodoro session from group chat:', e);
-    }
 
     // 그룹 공부 시작 소켓 이벤트
     socket.emit(clientToServerEvents.studyStart, { groupId });
@@ -629,7 +920,7 @@ const ChatRoomScreen = () => {
     } catch {
       // 알림 실패는 무시
     }
-  }, [socket, groupId, user, effectiveTimerDuration, group]);
+  }, [socket, groupId, user, group]);
 
   // 공부 종료
   const handleStopStudy = useCallback(async () => {
@@ -641,22 +932,6 @@ const ChatRoomScreen = () => {
     setElapsedSeconds(0);
     setCurrentSessionType('study');
 
-    // 포모도로 세션 완료 처리
-    if (pomodoroSessionId) {
-      try {
-        await apiFetch(getApiUrl(`/api/pomodoro/sessions/${pomodoroSessionId}/complete`), {
-          method: 'PUT',
-          requireAuth: true,
-        });
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Error completing shared pomodoro session from group chat:', e);
-      } finally {
-        setPomodoroSessionId(null);
-        await AsyncStorage.removeItem(STORAGE_KEY);
-      }
-    }
-
     // 진행 중인 알림 정리
     try {
       await Notifications.dismissAllNotificationsAsync();
@@ -664,22 +939,24 @@ const ChatRoomScreen = () => {
       // 무시
     }
 
+    void dismissCheckInUi(true);
+
     // 공부 종료 후 통계 다시 조회 (서버에서 time update가 늦게 올 수 있으므로)
     setTimeout(() => {
       if (socket && groupId) {
         socket.emit(clientToServerEvents.studyStatus, { groupId });
       }
     }, 500);
-  }, [socket, groupId, pomodoroSessionId, user]);
+  }, [socket, groupId, user, dismissCheckInUi]);
 
   // 체크인 버튼 클릭
   const handleCheckIn = useCallback(() => {
     if (!socket || !groupId) return;
 
-    // 활성 세션 ID는 서버에서 처리하므로 임시로 빈 문자열 전송
+    const sessionId = activeCheckInSessionIdRef.current;
     socket.emit(clientToServerEvents.studyCheckInSubmit, {
       groupId,
-      sessionId: '', // 서버에서 활성 세션을 찾아서 처리
+      ...(sessionId ? { sessionId } : {}),
     });
   }, [socket, groupId]);
 
@@ -692,15 +969,173 @@ const ChatRoomScreen = () => {
 
   if (!group) {
     return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size='large' color={colors.blue500} />
-          <Text style={styles.loadingText}>로딩 중...</Text>
-        </View>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size='large' color={colors.blue500} />
+        <Text style={styles.loadingText}>로딩 중...</Text>
+      </View>
     );
   }
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+      {/* 그룹 편집 모달 (중앙 알림 모달 규격) */}
+      <AppModal
+        visible={editingGroup}
+        onRequestClose={() => {
+          if (savingGroupSettings) return;
+          setEditingGroup(false);
+        }}
+        title='그룹 설정'
+        subtitle={group?.name}
+        animationType='fade'
+        type='confirmCancel'
+        confirmText='저장'
+        cancelText='취소'
+        onConfirm={handleSaveGroupEdit}
+        onCancel={() => {
+          if (savingGroupSettings) return;
+          setEditingGroup(false);
+        }}
+        confirmDisabled={
+          savingGroupSettings ||
+          editChatEnabled === null ||
+          editCheckInInterval === null ||
+          editCheckInDurationSeconds === null ||
+          !editGroupName.trim()
+        }
+        content={
+          <View style={styles.groupSettingsSection}>
+            <View style={[styles.groupSettingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.groupSettingLabel, { color: themeColors.textPrimary }]}>
+                그룹명
+              </Text>
+            </View>
+            <TextInput
+              style={[
+                styles.groupNameInput,
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: themeColors.border,
+                  color: themeColors.textPrimary,
+                },
+              ]}
+              value={editGroupName}
+              onChangeText={setEditGroupName}
+              placeholder='그룹명을 입력하세요'
+              placeholderTextColor={themeColors.textTertiary}
+              maxLength={100}
+            />
+
+            <View style={[styles.groupSettingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.groupSettingLabel, { color: themeColors.textPrimary }]}>
+                설명
+              </Text>
+            </View>
+            <TextInput
+              style={[
+                styles.groupDescriptionInput,
+                {
+                  backgroundColor: themeColors.surface,
+                  borderColor: themeColors.border,
+                  color: themeColors.textPrimary,
+                },
+              ]}
+              value={editGroupDescription}
+              onChangeText={setEditGroupDescription}
+              placeholder='그룹 설명을 입력하세요 (선택)'
+              placeholderTextColor={themeColors.textTertiary}
+              multiline
+              maxLength={500}
+            />
+
+            <View style={[styles.groupSettingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.groupSettingLabel, { color: themeColors.textPrimary }]}>
+                채팅 허용
+              </Text>
+              <Switch
+                value={editChatEnabled ?? false}
+                onValueChange={setEditChatEnabled}
+                trackColor={{ false: themeColors.borderSecondary, true: colors.blue500 }}
+                thumbColor='#FFFFFF'
+              />
+            </View>
+            <View style={[styles.groupSettingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.groupSettingLabel, { color: themeColors.textPrimary }]}>
+                체크인 간격 (분)
+              </Text>
+              <TextInput
+                style={[
+                  styles.groupIntervalInput,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                    color: themeColors.textPrimary,
+                  },
+                ]}
+                value={editCheckInInterval?.toString() ?? ''}
+                onChangeText={text => {
+                  const num = parseInt(text, 10);
+                  if (!isNaN(num) && num > 0) setEditCheckInInterval(num);
+                  else if (text === '') setEditCheckInInterval(null);
+                }}
+                keyboardType='number-pad'
+                placeholder='30'
+                placeholderTextColor={themeColors.textTertiary}
+              />
+            </View>
+            <View style={[styles.groupSettingRow, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.groupSettingLabel, { color: themeColors.textPrimary }]}>
+                체크인 노출 시간 (초)
+              </Text>
+              <TextInput
+                style={[
+                  styles.groupIntervalInput,
+                  {
+                    backgroundColor: themeColors.surface,
+                    borderColor: themeColors.border,
+                    color: themeColors.textPrimary,
+                  },
+                ]}
+                value={editCheckInDurationSeconds?.toString() ?? ''}
+                onChangeText={text => {
+                  const num = parseInt(text, 10);
+                  if (!isNaN(num) && num > 0) setEditCheckInDurationSeconds(num);
+                  else if (text === '') setEditCheckInDurationSeconds(null);
+                }}
+                keyboardType='number-pad'
+                placeholder='30'
+                placeholderTextColor={themeColors.textTertiary}
+              />
+            </View>
+          </View>
+        }
+      />
+
+      {/* 그룹 설정 저장 완료 모달 */}
+      <AppModal
+        visible={groupSettingsSavedModalVisible}
+        onRequestClose={() => setGroupSettingsSavedModalVisible(false)}
+        title='저장되었습니다.'
+        subtitle='그룹 정보가 저장되었습니다.'
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        onConfirm={() => setGroupSettingsSavedModalVisible(false)}
+      />
+
+      {/* 공통 오류/알림 모달 */}
+      <AppModal
+        visible={alertModal.visible}
+        onRequestClose={closeAlertModal}
+        title={alertModal.title}
+        subtitle={alertModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={alertModal.variant === 'danger' ? 'danger' : 'primary'}
+        onConfirm={closeAlertModal}
+      />
+
       {/* 헤더 */}
       <View
         style={[
@@ -731,13 +1166,24 @@ const ChatRoomScreen = () => {
             </Text>
           ) : null}
         </View>
-        <TouchableOpacity
-          style={styles.settingsButton}
-          onPress={() => setShowSettings(true)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <IconSymbol name='settings' size={24} color={themeColors.textPrimary} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {isOwner && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleOpenGroupEdit}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <IconSymbol name='edit' size={22} color={themeColors.textPrimary} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => setShowSettings(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <IconSymbol name='settings' size={24} color={themeColors.textPrimary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -788,15 +1234,6 @@ const ChatRoomScreen = () => {
                   <IconSymbol name={'arrow-drop-down'} size={25} color={colors.textSecondary} />
                 </TouchableOpacity>
                 <View style={styles.myChipWrapper}>
-                  {/* 게이지 효과 (카드칩 주변) */}
-                  <CircularProgress
-                    progress={getProgress}
-                    size={88}
-                    strokeWidth={4}
-                    color={getGaugeColor()}
-                    backgroundColor={themeColors.border}
-                    animated={isStudyActive}
-                  />
                   {/* 내 카드칩 */}
                   <View style={styles.myChipInner}>
                     <RankingChip
@@ -806,7 +1243,6 @@ const ChatRoomScreen = () => {
                       // 내 칩은 todayMinutes 기준으로 실시간 업데이트
                       totalMinutes={todayMinutes}
                       isActive={isStudyActive}
-                      liveTimerText={formatTimerDisplay()}
                       showRankBadge={myRankingEntry.rank > 0 && myRankingEntry.rank <= 5}
                     />
                   </View>
@@ -816,24 +1252,24 @@ const ChatRoomScreen = () => {
 
             {/* 다른 참여자들 (수평 스크롤) */}
             {otherRankingEntries.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
                 style={styles.otherRankingContainer}
                 contentContainerStyle={styles.otherRankingContent}
-          >
+              >
                 {otherRankingEntries.map(entry => (
-              <RankingChip
-                key={entry.userId}
-                rank={entry.rank}
-                displayName={entry.displayName}
-                avatar={entry.avatar}
-                totalMinutes={entry.totalMinutes}
-                    isActive={false}
+                  <RankingChip
+                    key={entry.userId}
+                    rank={entry.rank}
+                    displayName={entry.displayName}
+                    avatar={entry.avatar}
+                    totalMinutes={entry.totalMinutes}
+                    isActive={isStudyActive && entry.rank > 0 && entry.rank <= 3}
                     showRankBadge={entry.rank > 0 && entry.rank <= 5}
-              />
-            ))}
-          </ScrollView>
+                  />
+                ))}
+              </ScrollView>
             )}
           </View>
         )}
@@ -954,7 +1390,7 @@ const ChatRoomScreen = () => {
                 },
               ]}
             >
-              <View style={[styles.inputWrapper, { backgroundColor: themeColors.cardBackground }]}>
+              <View style={[styles.inputWrapper, { backgroundColor: themeColors.surface }]}>
                 <TextInput
                   style={[
                     styles.input,
@@ -1009,7 +1445,17 @@ const ChatRoomScreen = () => {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.stopButton} onPress={handleStopStudy}>
-              <Text style={styles.stopButtonText}>공부 종료</Text>
+              <View
+                pointerEvents='none'
+                style={[
+                  styles.studyProgressFill,
+                  {
+                    width: `${Math.round(sessionProgress * 100)}%`,
+                    backgroundColor: progressFillColor,
+                  },
+                ]}
+              />
+              <Text style={styles.stopButtonText}>{`${formatTimerDisplay()} · 종료`}</Text>
             </TouchableOpacity>
           )}
 
@@ -1110,8 +1556,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   myChipWrapper: {
-    width: 80,
-    height: 80,
+    width: 64,
+    height: 64,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
@@ -1176,6 +1622,14 @@ const styles = StyleSheet.create({
   },
   headerContent: {
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  iconButton: {
+    paddingHorizontal: 4,
   },
   headerTitle: {
     fontSize: 16,
@@ -1325,8 +1779,8 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   inputContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     backgroundColor: colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.gray200,
@@ -1342,10 +1796,11 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 15,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    maxHeight: 100,
-    minHeight: 40,
+    lineHeight: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    maxHeight: 72, // 3 lines (20*3) + vertical padding
+    minHeight: 34,
   },
   sendButton: {
     width: 40,
@@ -1382,6 +1837,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
+    overflow: 'hidden',
   },
   startButtonText: {
     color: '#FFFFFF',
@@ -1390,10 +1846,19 @@ const styles = StyleSheet.create({
   },
   stopButton: {
     flex: 1,
-    backgroundColor: '#DC2626',
+    backgroundColor: colors.red600,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  studyProgressFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    opacity: 1,
   },
   stopButtonText: {
     color: '#FFFFFF',
@@ -1411,6 +1876,51 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  groupSettingsSection: {
+    marginBottom: 24,
+  },
+  groupSettingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  groupSettingLabel: {
+    fontSize: 16,
+    flex: 1,
+  },
+  groupNameInput: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 16,
+  },
+  groupDescriptionInput: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 14,
+    textAlignVertical: 'top',
+    minHeight: 80,
+  },
+  groupIntervalInput: {
+    width: 80,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 16,
+    textAlign: 'center',
   },
   modalBackdrop: {
     position: 'absolute',

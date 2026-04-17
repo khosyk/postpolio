@@ -147,10 +147,6 @@ Socket.IO: study:start 이벤트
     ↓
 서버: study_sessions 테이블에 세션 생성
     ↓
-서버: 포모도로 세션도 함께 생성 (통계 연동)
-    ↓
-클라이언트: AsyncStorage에 세션 정보 저장
-    ↓
 체크인 간격마다 체크인 버튼 표시
     ↓
 체크인 완료 시 공부 시간 인정
@@ -163,7 +159,7 @@ Socket.IO: study:start 이벤트
 - **Expo Router**: 파일 기반 라우팅 (Next.js와 유사)
 - **React Context**: 전역 상태 관리 (인증, 그룹, 테마)
 - **Socket.IO**: 실시간 양방향 통신 (채팅, 공부 세션)
-- **AsyncStorage**: 로컬 데이터 저장 (토큰, 세션 정보)
+- **AsyncStorage**: 로컬 데이터 저장 (토큰, 포모도로 타이머 상태)
 - **Supabase**: 백엔드 서비스 (인증, 데이터베이스)
 
 ## 📁 프로젝트 구조
@@ -310,7 +306,7 @@ cd server && yarn dev
 1. 사용자가 "공부 시작" 버튼 클릭
 2. Socket.IO로 `study:start` 이벤트 전송
 3. 서버에서 `study_sessions` 테이블에 세션 생성
-4. 포모도로 세션도 함께 생성 (그룹챗과 통계 연동)
+4. 서버에서 다른 모드의 활성 공부 세션이 있으면 먼저 종료 (단일 활성 원칙)
 5. 방장이 설정한 `check_in_interval`마다 체크인 버튼 표시
 6. 체크인 완료 시 해당 시간까지의 공부 시간 인정
 7. 실시간으로 Top 5 랭킹 업데이트 (`study:ranking:update` 이벤트)
@@ -333,10 +329,10 @@ cd server && yarn dev
 6. 세션 완료 시 API 호출 (`PUT /api/pomodoro/sessions/:id/complete`)
 7. 통계 업데이트 (완료 세트 수, 총 공부 시간)
 
-**그룹챗 연동**:
-- 그룹챗에서 "공부 시작" 시 포모도로 세션도 함께 생성
-- AsyncStorage에 세션 정보 저장하여 포모도로 탭과 공유
-- 공부 시간이 통계 탭에 반영됨
+**세션 정책**:
+- 포모도로와 그룹 공부는 별개 화면에서 시작/종료
+- 단, 사용자 기준 활성 공부 세션은 1개만 허용
+- 포모도로 시작 시 활성 그룹 공부 세션이 있으면 먼저 종료
 
 **백그라운드 지원**:
 - 앱이 백그라운드에 있어도 타이머 계속 동작
@@ -407,7 +403,7 @@ cd server && yarn dev
 프로젝트를 처음 시작하는 경우:
 
 1. **저장소 클론**
-   ```bash
+```bash
    git clone <repository-url>
    cd postpolio
    ```
@@ -557,6 +553,32 @@ const MyComponent = () => {
 ```
 
 ### 주요 컴포넌트
+
+#### AppModal (표준 모달)
+
+**용도**: 앱 전반에서 동일한 형태의 모달을 사용하기 위한 공통 컴포넌트.
+
+**규격**:
+- 반투명 백드롭(`dimBg`), 중앙 카드(너비 90%, 최대 400px, `borderRadius` 16, 패딩 24)
+- 제목(필수), 부제목(선택), 본문(children)
+- 테마 색상 자동 적용(`useTheme` + `getThemeColors`)
+
+**사용**:
+```typescript
+import AppModal from '@/components/AppModal';
+
+<AppModal
+  visible={visible}
+  onRequestClose={() => setVisible(false)}
+  title="제목"
+  subtitle="부제목 (선택)"
+  animationType="fade"
+>
+  {/* 폼, 버튼, 메뉴 목록 등 */}
+</AppModal>
+```
+
+**규칙**: 새로 만드는 모달(메뉴, 설정, 확인 등)은 가능한 한 `AppModal`을 사용하고, 테마 색상(`themeColors`)을 적용한다. 바텀 시트/풀스크린 피커 등 특수 형태는 기존 `DatePickerModal`처럼 별도 구현 가능.
 
 #### RadarChart (방사형 그래프)
 
@@ -1061,6 +1083,7 @@ eas build --profile production --platform android
 - **study_groups**: 스터디 그룹 정보
   - `chat_enabled`: 채팅 허용 여부
   - `check_in_interval`: 체크인 간격 (분)
+  - `check_in_duration_seconds`: 체크인 버튼이 보이는 시간(초, 10~300, 기본 30)
 - **group_members**: 그룹 멤버 관계
 - **group_messages**: 채팅 메시지
 - **study_sessions**: 공부 세션 (그룹 공부)
@@ -1152,8 +1175,7 @@ yarn gf:finish 0.1.0
    - "공부 시작" 버튼 클릭
    - Socket.IO: `study:start` 이벤트
    - 서버: `study_sessions` 테이블에 세션 생성
-   - 서버: 포모도로 세션도 함께 생성 (`pomodoro_sessions`)
-   - 클라이언트: AsyncStorage에 세션 정보 저장
+   - 서버: 기존 활성 포모도로/타 그룹 공부 세션이 있으면 먼저 종료
    - 클라이언트: 알림 표시 (상태바)
 
 5. **체크인**
@@ -1166,13 +1188,12 @@ yarn gf:finish 0.1.0
    - "공부 종료" 버튼 클릭
    - Socket.IO: `study:stop` 이벤트
    - 서버: 세션 종료 처리
-   - 클라이언트: AsyncStorage에서 세션 정보 제거
    - 클라이언트: 알림 제거
 
 7. **통계 확인**
    - 통계 탭에서 오늘 공부 시간 확인
    - 포모도로 탭에서 완료 세트 수 확인
-   - 두 탭 모두 동일한 데이터 표시 (공유 세션)
+   - 통계 탭에서 `study_sessions + pomodoro_sessions` 합산 값 확인
 
 ### 시나리오 2: 성적표 관리
 
@@ -1238,11 +1259,13 @@ yarn gf:finish 0.1.0
 
 ### 공부 시간 통합
 
-**그룹챗 공부** ↔ **포모도로 타이머** ↔ **통계 탭**
+**그룹챗 공부** + **포모도로 타이머** → **통계 탭**
 
-- 그룹챗에서 공부 시작 시 포모도로 세션도 함께 생성
-- AsyncStorage로 세션 정보 공유
-- 모든 공부 시간이 통계 탭에 통합 표시
+- 그룹챗의 공부 상태는 `study_sessions`를 기준으로 유지
+- 포모도로는 포모도로 탭에서 독립적으로 생성/관리
+- 사용자 기준 활성 공부 세션은 1개만 허용
+- 한 모드 시작 시 다른 모드의 활성 세션은 서버에서 자동 종료
+- 통계 API 조회 시 두 테이블 데이터를 합산
 
 **데이터 흐름**:
 ```
@@ -1250,11 +1273,13 @@ yarn gf:finish 0.1.0
     ↓
 study_sessions 테이블 (그룹 공부)
     ↓
+통계 API 조회 시 study_sessions 집계
+
+포모도로 탭 "세션 시작"
+    ↓
 pomodoro_sessions 테이블 (개인 타이머)
     ↓
-AsyncStorage (세션 정보 공유)
-    ↓
-통계 API 조회 시 두 테이블 모두 집계
+통계 API 조회 시 pomodoro_sessions 집계
 ```
 
 ### 알림 연동
@@ -1313,6 +1338,7 @@ AsyncStorage (세션 정보 공유)
 
 ### 공통 컴포넌트
 
+- **모달**: `components/AppModal.tsx` (표준 모달, 테마 적용)
 - **차트**: `components/RadarChart.tsx`, `components/LineChart.tsx`
 - **랭킹**: `components/RankingChip.tsx`
 - **타이머**: `components/TimerGauge.tsx`, `components/CircularProgress.tsx`

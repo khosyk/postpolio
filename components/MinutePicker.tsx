@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, colors } from '@/constants/colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { colors, getThemeColors } from '@/constants/colors';
+import { useTheme } from '@/contexts/ThemeContext';
 
 interface MinutePickerProps {
   label?: string;
@@ -15,17 +15,17 @@ interface MinutePickerProps {
 }
 
 // 분 단위 시간 선택 컴포넌트 (최대 24시간 = 1440분)
-const MinutePicker = ({
+const MinutePicker: React.FC<MinutePickerProps> = ({
   label,
   value,
   onChange,
   minimumValue = 1,
   maximumValue = 1440,
   errorText,
-}: MinutePickerProps) => {
-  const colorScheme = useColorScheme() ?? 'light';
-  const isDark = colorScheme === 'dark';
-  const theme = isDark ? Colors.dark : Colors.light;
+}) => {
+  // RN useColorScheme 대신 ThemeContext 기반 사용
+  const { isDark } = useTheme();
+  const theme = getThemeColors(isDark);
   const insets = useSafeAreaInsets();
 
   const [show, setShow] = useState(false);
@@ -46,7 +46,8 @@ const MinutePicker = ({
   };
 
   const handleDone = () => {
-    onChange(tempValue);
+    const clamped = Math.max(minimumValue, Math.min(maximumValue, tempValue));
+    onChange(clamped);
     setShow(false);
   };
 
@@ -79,10 +80,12 @@ const MinutePicker = ({
           },
         ]}
         onPress={handleOpen}
+        activeOpacity={0.7}
       >
         <Text style={[styles.inputText, { color: theme.textPrimary }]}>{formatTime(value)}</Text>
       </TouchableOpacity>
       {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+
       {show && (
         <Modal
           transparent
@@ -147,22 +150,22 @@ const MinutePicker = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 16,
+    marginBottom: 12,
   },
   label: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.textPrimary,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   input: {
     borderWidth: 1,
     borderColor: colors.gray200,
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     backgroundColor: colors.white,
-    minHeight: 44,
+    minHeight: 40,
     justifyContent: 'center',
   },
   inputError: {

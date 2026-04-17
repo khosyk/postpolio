@@ -14,7 +14,7 @@ import { router, useNavigation } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { getApiUrl } from '@/config/api';
 import Input from '@/components/Input';
-import DatePicker from '@/components/DatePicker';
+import DatePickerModal from '@/components/DatePickerModal';
 import BlockingLoader from '@/components/BlockingLoader';
 import { CreateExamSchema } from '@/shared/schemas/grade';
 import { apiFetch } from '@/utils/apiClient';
@@ -22,10 +22,11 @@ import { colors, Colors } from '@/constants/colors';
 import { ExamTemplate } from '@/types/grade';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import AppModal from '@/components/AppModal';
 
 // 시험 생성 화면
 const CreateExamScreen = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigation = useNavigation();
   const colorScheme = useColorScheme() ?? 'light';
   const isDark = colorScheme === 'dark';
@@ -37,6 +38,53 @@ const CreateExamScreen = () => {
   const [templates, setTemplates] = useState<ExamTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<ExamTemplate | null>(null);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [modalState, setModalState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    variant?: 'primary' | 'danger';
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'primary',
+  });
+
+  const closeModal = () =>
+    setModalState(prev => ({
+      ...prev,
+      visible: false,
+      onConfirm: undefined,
+    }));
+
+  const showError = (message: string, title = t('common.error')) => {
+    setModalState({
+      visible: true,
+      title,
+      message,
+      variant: 'danger',
+    });
+  };
+
+  const showInfo = (title: string, message: string, onConfirm?: () => void) => {
+    setModalState({
+      visible: true,
+      title,
+      message,
+      variant: 'primary',
+      onConfirm,
+    });
+  };
+
+  const formatExamDate = (date: Date): string => {
+    try {
+      return date.toLocaleDateString(i18n.language);
+    } catch {
+      return date.toISOString().split('T')[0];
+    }
+  };
 
   // 템플릿 목록 조회
   const fetchTemplates = useCallback(async () => {
@@ -88,7 +136,7 @@ const CreateExamScreen = () => {
       } else if (first.path[0] === 'exam_date') {
         setDateError(first.message);
       }
-      Alert.alert('오류', first.message);
+      showError(first.message);
       return;
     }
 
@@ -145,21 +193,16 @@ const CreateExamScreen = () => {
           }
         }
 
-        Alert.alert(
+        showInfo(
           t('common.success'),
           t('grades.examCreated', { defaultValue: '시험이 생성되었습니다.' }),
-          [
-            {
-              text: t('common.confirm'),
-              onPress: () => router.push(`/grades/${examId}/subjects`),
-            },
-          ],
+          () => router.push(`/grades/${examId}/subjects`),
         );
       } else {
-        Alert.alert(t('common.error'), data?.message ?? t('errors.generic'));
+        showError(data?.message ?? t('errors.generic'));
       }
     } catch (e) {
-      Alert.alert(t('common.error'), (e as Error).message ?? t('errors.generic'));
+      showError((e as Error).message ?? t('errors.generic'));
     } finally {
       setLoading(false);
     }
@@ -215,13 +258,21 @@ const CreateExamScreen = () => {
                 autoCapitalize='none'
               />
 
-              <DatePicker
-                label={t('grades.examDate')}
-                value={examDate}
-                onChange={setExamDate}
-                minimumDate={new Date()}
-                errorText={dateError}
-              />
+              <View style={styles.dateFieldContainer}>
+                <Text style={styles.dateLabel}>{t('grades.examDate')}</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.dateInput,
+                    dateError ? styles.dateInputError : null,
+                    { backgroundColor: isDark ? Colors.dark.surface : colors.white },
+                  ]}
+                  onPress={() => setShowDatePicker(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.dateInputText}>{formatExamDate(examDate)}</Text>
+                </TouchableOpacity>
+                {dateError ? <Text style={styles.dateErrorText}>{dateError}</Text> : null}
+              </View>
 
               <View style={styles.templateSection}>
                 <Text
@@ -265,8 +316,8 @@ const CreateExamScreen = () => {
                                 ? colors.gray800
                                 : colors.gray800
                               : selectedTemplate?.id === item.id
-                              ? colors.blue50
-                              : colors.gray100,
+                                ? colors.blue50
+                                : colors.gray100,
                           },
                           selectedTemplate?.id === item.id && styles.templateCardSelected,
                         ]}
@@ -319,9 +370,36 @@ const CreateExamScreen = () => {
           </ScrollView>
         </KeyboardAvoidingView>
       </View>
+      {/* 시험 일자 선택 모달 (공용 DatePickerModal 사용) */}
+      <DatePickerModal
+        visible={showDatePicker}
+        value={examDate}
+        minimumDate={new Date()}
+        onConfirm={date => {
+          setExamDate(date);
+          setShowDatePicker(false);
+        }}
+        onClose={() => setShowDatePicker(false)}
+      />
       <BlockingLoader
         visible={loading}
         message={t('grades.creating', { defaultValue: '시험 생성 중...' })}
+      />
+      <AppModal
+        visible={modalState.visible}
+        onRequestClose={closeModal}
+        title={modalState.title}
+        subtitle={modalState.message}
+        animationType='fade'
+        type='confirm'
+        confirmText={t('common.confirm')}
+        confirmVariant={modalState.variant === 'danger' ? 'danger' : 'primary'}
+        onConfirm={() => {
+          if (modalState.onConfirm) {
+            modalState.onConfirm();
+          }
+          closeModal();
+        }}
       />
     </>
   );
@@ -428,5 +506,35 @@ const styles = StyleSheet.create({
   },
   templateSubjects: {
     fontSize: 11,
+  },
+  dateFieldContainer: {
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  dateLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    marginBottom: 8,
+  },
+  dateInput: {
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    justifyContent: 'center',
+  },
+  dateInputError: {
+    borderColor: colors.error,
+  },
+  dateInputText: {
+    fontSize: 14,
+    color: colors.textPrimary,
+  },
+  dateErrorText: {
+    fontSize: 12,
+    color: colors.error,
+    marginTop: 4,
   },
 });

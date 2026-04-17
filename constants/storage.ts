@@ -22,6 +22,8 @@ export const storageKeys = {
   group: {
     favorites: '@postpolio/group/favorites',
     lastSelectedGroupId: '@postpolio/group/lastSelectedGroupId',
+    /** 그룹 채팅 체크인 창 복원용 (앱 종료/백그라운드 후 재개) */
+    checkInPending: (groupId: string) => `@postpolio/group/checkInPending/${groupId}`,
   },
 
   // 포모도로 관련
@@ -50,6 +52,7 @@ export const storageKeys = {
 export type StorageKey =
   | (typeof storageKeys.auth)[keyof typeof storageKeys.auth]
   | (typeof storageKeys.group)[keyof typeof storageKeys.group]
+  | ReturnType<typeof storageKeys.group.checkInPending>
   | (typeof storageKeys.pomodoro)[keyof typeof storageKeys.pomodoro]
   | (typeof storageKeys.grade)[keyof typeof storageKeys.grade]
   | (typeof storageKeys.settings)[keyof typeof storageKeys.settings];

@@ -1,9 +1,18 @@
 import studyRepository from '../repositories/studyRepository';
 import groupRepository from '../repositories/groupRepository';
 import userRepository from '../repositories/userRepository';
+import pomodoroRepository from '../repositories/pomodoroRepository';
 import { RankingEntry } from '../types';
 
 class StudyService {
+  private getElapsedMinutes(startedAt: string): number {
+    const started = new Date(startedAt);
+    const now = new Date();
+    const diffMs = now.getTime() - started.getTime();
+    if (Number.isNaN(diffMs) || diffMs <= 0) return 0;
+    return Math.max(1, Math.round(diffMs / (1000 * 60)));
+  }
+
   // 공부 세션 시작
   async startStudySession(groupId: string, userId: string) {
     // 그룹 멤버인지 확인
@@ -18,6 +27,44 @@ class StudyService {
       // 이미 활성 세션이 있는 경우 에러 대신 기존 세션을 반환하여
       // 클라이언트에서 재시작 시에도 부드럽게 동작하도록 처리
       return existingSession;
+    }
+
+    // 다른 그룹에서 활성화된 기존 공부 세션이 있으면 종료 처리
+    const activeStudySessions = await studyRepository.getActiveSessionsByUser(userId);
+    const otherGroupSessions = activeStudySessions.filter(session => session.group_id !== groupId);
+    for (const session of otherGroupSessions) {
+      const elapsedMinutes = this.getElapsedMinutes(session.started_at);
+      await studyRepository.updateSession(session.id, {
+        ended_at: new Date().toISOString(),
+        status: 'ended',
+        total_minutes: elapsedMinutes,
+      });
+    }
+
+    // 활성 포모도로 세션이 있으면 먼저 정리하여 "공부 세션 1개" 원칙 유지
+    const activePomodoro = await pomodoroRepository.getActiveSession(userId);
+    if (activePomodoro) {
+      if (activePomodoro.type === 'study') {
+        const elapsedMinutes = this.getElapsedMinutes(activePomodoro.created_at);
+        const safeMinutes = Math.max(
+          1,
+          Math.min(
+            elapsedMinutes,
+            Math.max(1, Math.round(Number(activePomodoro.duration_minutes) || 1)),
+            1440
+          )
+        );
+        await pomodoroRepository.updateSession(activePomodoro.id, {
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          duration_minutes: safeMinutes,
+        });
+      } else {
+        await pomodoroRepository.updateSession(activePomodoro.id, {
+          status: 'cancelled',
+          completed_at: null,
+        });
+      }
     }
 
     // 새 세션 생성
@@ -86,20 +133,28 @@ class StudyService {
     // 그룹의 모든 활성 세션 조회
     const activeSessions = await studyRepository.getActiveSessionsByGroup(groupId);
 
+    const checkInDurationSeconds = group.check_in_duration_seconds ?? 30;
+
     return {
       groupId,
       activeSessions: activeSessions.map(s => s.id),
       checkInInterval: group.check_in_interval,
+      checkInDurationSeconds,
     };
   }
 
   // 체크인 버튼 클릭 처리
-  async submitCheckIn(groupId: string, userId: string, sessionId: string) {
+  async submitCheckIn(groupId: string, userId: string, sessionId?: string) {
     // 세션 확인
     const session = await studyRepository.getActiveSession(groupId, userId);
-    if (!session || session.id !== sessionId) {
+    if (!session) {
       throw new Error('유효한 세션을 찾을 수 없습니다.');
     }
+    if (sessionId && session.id !== sessionId) {
+      throw new Error('유효한 세션을 찾을 수 없습니다.');
+    }
+
+    const sid = session.id;
 
     // 그룹 정보 조회
     const group = await groupRepository.getGroupById(groupId);
@@ -108,7 +163,7 @@ class StudyService {
     }
 
     // 방장이 먼저 체크인했는지 확인
-    const ownerCheckIn = await studyRepository.getValidCheckIns(sessionId);
+    const ownerCheckIn = await studyRepository.getValidCheckIns(sid);
     const ownerSession = await studyRepository.getActiveSession(groupId, group.owner_id);
     const ownerHasCheckedIn =
       ownerSession &&
@@ -119,15 +174,41 @@ class StudyService {
 
     // 체크인 기록 생성
     await studyRepository.createCheckInRecord({
-      session_id: sessionId,
+      session_id: sid,
       user_id: userId,
       group_id: groupId,
       is_valid: isValid,
     });
 
+    // 공부 증명(체크인) 검증 실패 시 현재 활성 세션을 즉시 종료
+    if (!isValid) {
+      const validMinutes = await studyRepository.calculateValidStudyTime(
+        sid,
+        group.check_in_interval
+      );
+
+      await studyRepository.updateSession(sid, {
+        ended_at: new Date().toISOString(),
+        status: 'ended',
+        total_minutes: validMinutes,
+      });
+
+      const todayStats = await studyRepository.getTodayStats(groupId, userId);
+      return {
+        success: true,
+        isValid,
+        sessionId: session.id,
+        sessionEnded: true,
+        totalMinutes: todayStats.totalMinutes,
+        message: '공부 증명 확인에 실패하여 현재 공부 세션이 종료되었습니다.',
+      };
+    }
+
     return {
       success: true,
       isValid,
+      sessionId: session.id,
+      sessionEnded: false,
       message: isValid ? '체크인 완료' : '방장이 먼저 체크인해야 합니다.',
     };
   }

@@ -32,5 +32,10 @@ export const UpdateGroupSettingsSchema = z.object({
     .min(5, '체크인 간격은 최소 5분입니다.')
     .max(120, '체크인 간격은 최대 120분입니다.')
     .optional(),
+  check_in_duration_seconds: z
+    .number()
+    .min(10, '체크인 노출 시간은 최소 10초입니다.')
+    .max(300, '체크인 노출 시간은 최대 300초입니다.')
+    .optional(),
 });
 export type UpdateGroupSettingsInput = z.infer<typeof UpdateGroupSettingsSchema>;

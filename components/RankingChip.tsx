@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, Animated } from 'react-native';
+import { StyleSheet, Text, View, Animated, Easing } from 'react-native';
 import { rankingColors, colors, getThemeColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 
@@ -8,19 +8,21 @@ interface RankingChipProps {
   displayName: string;
   avatar: string;
   totalMinutes: number;
-  isActive?: boolean; // 공부 활성화 여부 (애니메이션 제어)
-  liveTimerText?: string; // 실시간 세션 타이머 텍스트
-  showRankBadge?: boolean; // 등수 뱃지 표시 여부
+  isActive?: boolean;
+  liveTimerText?: string;
+  showRankBadge?: boolean;
 }
 
-// 랭킹 칩 컴포넌트
+const CHIP_SIZE = 60;
+const RING_SIZE = CHIP_SIZE + 4;
+const RING_RADIUS = RING_SIZE / 2;
+
 const RankingChip: React.FC<RankingChipProps> = ({
   rank,
   displayName,
   avatar,
   totalMinutes,
-  isActive = true,
-  liveTimerText,
+  isActive = false,
   showRankBadge = true,
 }) => {
   const { isDark } = useTheme();
@@ -29,93 +31,63 @@ const RankingChip: React.FC<RankingChipProps> = ({
 
   useEffect(() => {
     if (isActive) {
+      rotateAnim.setValue(0);
       Animated.loop(
         Animated.timing(rotateAnim, {
           toValue: 1,
-          duration: 2500,
+          duration: 2200,
+          easing: Easing.linear,
           useNativeDriver: true,
         }),
       ).start();
-    } else {
-      // 공부 종료 시 애니메이션 중지
-      rotateAnim.stopAnimation();
-      rotateAnim.setValue(0);
+      return;
     }
-  }, [rotateAnim, isActive]);
 
-  const rankColor = rankingColors[rank as keyof typeof rankingColors] || rankingColors[5];
+    rotateAnim.stopAnimation();
+    rotateAnim.setValue(0);
+  }, [isActive, rotateAnim]);
 
-  // 보더를 따라 색이 흐르는 느낌을 위해 상단/우측만 색을 주고 회전
   const rotate = rotateAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
 
+  const rankColor = rankingColors[rank as keyof typeof rankingColors] || rankingColors[5];
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   const totalTimeLabel = `${hours}h ${minutes.toString().padStart(2, '0')}m`;
-
-  // 닉네임은 최대 8글자로 제한
   const truncatedName = displayName.length > 8 ? displayName.slice(0, 8) : displayName;
-
-  // 1등 배지 색상 (노란색 계열)
-  const firstRankBadgeBg = colors.yellow500;
-  const firstRankBadgeShadow = colors.yellow600;
 
   return (
     <View style={styles.container}>
       <View style={styles.wrapper}>
-        {/* 회전하는 보더 하이라이트 (내용 박스를 2px 정도 감싸는 링) */}
+        <View style={[styles.trackRing, { borderColor: themeColors.border }]} />
         {isActive && (
           <Animated.View
+            pointerEvents='none'
             style={[
-              styles.rotatingBorder,
+              styles.activeRing,
               {
                 borderTopColor: rankColor,
                 borderRightColor: rankColor,
                 transform: [{ rotate }],
               },
-              rank === 1 && [
-                styles.firstRing,
-                {
-                  shadowColor: firstRankBadgeShadow,
-                },
-              ],
             ]}
           />
         )}
 
-        {/* 실제 콘텐츠 박스 */}
-        <View
-          style={[
-            styles.chip,
-            {
-              backgroundColor: themeColors.cardBackground,
-            },
-          ]}
-        >
-          {/* 랭킹 배지 (#1, #2, #3 ...) - 왼쪽 위 */}
+        <View style={[styles.chip, { backgroundColor: themeColors.cardBackground }]}>
           {showRankBadge && rank > 0 && (
             <View
               style={[
                 styles.rankBadge,
-                {
-                  backgroundColor: rank === 1 ? firstRankBadgeBg : themeColors.cardBackground,
-                },
-                rank === 1 && [
-                  styles.firstRankBadge,
-                  {
-                    shadowColor: firstRankBadgeShadow,
-                  },
-                ],
+                { backgroundColor: rank === 1 ? colors.yellow500 : themeColors.surface },
               ]}
             >
               <Text
                 style={[
                   styles.rankBadgeText,
-                  {
-                    color: rank === 1 ? colors.gray900 : themeColors.textSecondary,
-                  },
+                  { color: rank === 1 ? colors.gray900 : themeColors.textSecondary },
                 ]}
               >
                 #{rank}
@@ -123,55 +95,16 @@ const RankingChip: React.FC<RankingChipProps> = ({
             </View>
           )}
 
-          {/* 내용 영역 (텍스트가 칩 전체를 사용) */}
-          <View style={styles.contentContainer}>
-            <Text
-              style={[
-                styles.name,
-                {
-                  color: themeColors.textPrimary,
-                },
-              ]}
-              numberOfLines={1}
-            >
+          <View style={[styles.avatarContainer, { backgroundColor: themeColors.surface }]}>
+            <Text style={styles.avatar}>{avatar}</Text>
+          </View>
+          <View style={styles.textStack}>
+            <Text style={[styles.name, { color: themeColors.textPrimary }]} numberOfLines={1}>
               {truncatedName}
             </Text>
-            <Text
-              style={[
-                styles.time,
-                {
-                  color: themeColors.textSecondary,
-                },
-              ]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.time, { color: themeColors.textSecondary }]} numberOfLines={1}>
               {totalTimeLabel}
             </Text>
-            {liveTimerText && (
-              <Text
-                style={[
-                  styles.liveTime,
-                  {
-                    color: themeColors.textSecondary,
-                  },
-                ]}
-                numberOfLines={1}
-              >
-                {liveTimerText}
-              </Text>
-            )}
-          </View>
-
-          {/* 아바타: 텍스트 위에 겹쳐지는 레이어 (absolute + opacity) */}
-          <View
-            style={[
-              styles.avatarContainer,
-              {
-                backgroundColor: themeColors.surface,
-              },
-            ]}
-          >
-            <Text style={styles.avatar}>{avatar}</Text>
           </View>
         </View>
       </View>
@@ -181,93 +114,95 @@ const RankingChip: React.FC<RankingChipProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginRight: 12,
+    marginRight: 8,
   },
   wrapper: {
-    padding: 2, // 내용 박스보다 2px 크게 래핑
-    borderRadius: 14,
+    width: RING_SIZE,
+    height: RING_SIZE,
     position: 'relative',
-    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trackRing: {
+    position: 'absolute',
+    width: RING_SIZE,
+    height: RING_SIZE,
+    borderRadius: RING_RADIUS,
+    borderWidth: 2,
+  },
+  activeRing: {
+    position: 'absolute',
+    width: RING_SIZE,
+    height: RING_SIZE,
+    borderRadius: RING_RADIUS,
+    borderWidth: 2,
+    borderTopColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderLeftColor: 'transparent',
   },
   chip: {
-    width: 160, // 가로는 더 줄이고
-    height: 68, // 세로는 늘려서 3줄 텍스트 여유 확보
-    borderRadius: 12,
-    borderWidth: 0, // 외곽 보더는 제거하고 테마 배경만 사용
-    position: 'relative',
+    width: CHIP_SIZE,
+    height: CHIP_SIZE,
+    borderRadius: CHIP_SIZE / 2,
     overflow: 'hidden',
+    position: 'relative',
+    alignItems: 'center',
   },
   rankBadge: {
     position: 'absolute',
-    top: -4,
-    left: -4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    minWidth: 32,
+    top: 4,
+    left: 4,
+    minWidth: 18,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
+    zIndex: 3,
   },
   rankBadgeText: {
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: '700',
   },
-  firstRankBadge: {},
-  // 래핑 박스 안에서 도는 보더 하이라이트
-  rotatingBorder: {
+  avatarContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: CHIP_SIZE,
+    height: CHIP_SIZE,
+    borderRadius: CHIP_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.35,
+    zIndex: 1,
+  },
+  avatar: {
+    fontSize: 30,
+  },
+  textStack: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    borderWidth: 2,
-    borderRadius: 14,
-    borderStyle: 'solid',
-    borderTopColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'transparent',
-    borderLeftColor: 'transparent',
-    zIndex: 1,
-  },
-  firstRing: {
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  contentContainer: {
-    flexDirection: 'column',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    height: '100%',
-    zIndex: 2,
-  },
-  name: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  time: {
-    fontSize: 12,
-  },
-  liveTime: {
-    fontSize: 11,
-  },
-  avatarContainer: {
-    position: 'absolute',
-    right: 8,
-    top: 12,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0.85,
+    zIndex: 2,
+    paddingHorizontal: 8,
+    gap: 1,
   },
-  avatar: {
-    fontSize: 22,
+  name: {
+    width: '100%',
+    textAlign: 'center',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  time: {
+    width: '100%',
+    textAlign: 'center',
+    fontSize: 8,
+    fontWeight: '500',
   },
 });
 

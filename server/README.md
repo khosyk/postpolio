@@ -480,6 +480,7 @@ CORS_ORIGIN=*
   - `owner_id` (FK → user_profiles)
   - `chat_enabled`: 채팅 허용 여부
   - `check_in_interval`: 체크인 간격 (분)
+  - `check_in_duration_seconds`: 체크인 노출 시간 (초, 10~300)
   
 - **group_members**: 그룹 멤버 관계
   - `group_id` (FK → study_groups)

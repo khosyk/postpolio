@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -24,6 +23,7 @@ import { apiFetch } from '@/utils/apiClient';
 import { colors, pomodoroColors, Colors } from '@/constants/colors';
 import { PomodoroSession, PomodoroSettings } from '@/types/pomodoro';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import AppModal from '@/components/AppModal';
 
 const STORAGE_KEY = 'pomodoro_session';
 
@@ -40,19 +40,51 @@ const PomodoroScreen = () => {
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-  const [tempSettings, setTempSettings] = useState<PomodoroSettings>(settings);
-  const [savingSettings, setSavingSettings] = useState(false);
   const [showCompletionAnimation, setShowCompletionAnimation] = useState(false);
-  const [isTestMode, setIsTestMode] = useState(false);
   const [autoContinue] = useState(true); // 자동 전환 활성화 여부
   const [todayCycleCount, setTodayCycleCount] = useState(0);
   const [todayStudyMinutes, setTodayStudyMinutes] = useState(0);
   const [todayStatsLoading, setTodayStatsLoading] = useState(false);
+  const [alertModal, setAlertModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    variant?: 'primary' | 'danger';
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'primary',
+  });
+  const [cancelConfirmVisible, setCancelConfirmVisible] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const backgroundTimeRef = useRef<number>(Date.now());
+
+  const showError = (message: string, title = '오류') => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'danger',
+    });
+  };
+
+  const showInfo = (title: string, message: string) => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      variant: 'primary',
+    });
+  };
+
+  const closeAlertModal = () =>
+    setAlertModal(prev => ({
+      ...prev,
+      visible: false,
+    }));
 
   // 설정 조회
   const fetchSettings = async () => {
@@ -66,29 +98,9 @@ const PomodoroScreen = () => {
       );
       if (data.data?.settings) {
         setSettings(data.data.settings);
-        setTempSettings(data.data.settings);
       }
     } catch {
       // 설정 조회 실패 시 기본값 사용
-    }
-  };
-
-  // 설정 저장
-  const handleSaveSettings = async () => {
-    try {
-      setSavingSettings(true);
-      await apiFetch(getApiUrl('/api/pomodoro/settings'), {
-        method: 'PUT',
-        requireAuth: true,
-        body: JSON.stringify(tempSettings),
-      });
-      setSettings(tempSettings);
-      setShowSettings(false);
-      Alert.alert('완료', '설정이 저장되었습니다.');
-    } catch (e) {
-      Alert.alert('오류', (e as Error).message ?? '설정 저장 중 오류가 발생했습니다.');
-    } finally {
-      setSavingSettings(false);
     }
   };
 
@@ -134,34 +146,6 @@ const PomodoroScreen = () => {
     }
   };
 
-  // 테스트 세션 시작 (3초)
-  const handleStartTestSession = () => {
-    setIsTestMode(true);
-    const testSession: PomodoroSession = {
-      id: 'test-session',
-      user_id: user?.id || '',
-      type: 'study',
-      duration_minutes: 0.05, // 3초 = 0.05분
-      completed_at: null,
-      status: 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    setSession(testSession);
-    setRemainingSeconds(3); // 3초
-    setIsRunning(true);
-    AsyncStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        sessionId: 'test-session',
-        startTime: Date.now(),
-        duration: 3,
-        type: 'study',
-        isTest: true,
-      }),
-    );
-  };
-
   // 세션 시작
   const handleStartSession = async (type: 'study' | 'break') => {
     try {
@@ -182,7 +166,6 @@ const PomodoroScreen = () => {
         setSession(newSession);
         setRemainingSeconds(duration * 60);
         setIsRunning(true);
-        setIsTestMode(false);
         await AsyncStorage.setItem(
           STORAGE_KEY,
           JSON.stringify({
@@ -190,7 +173,6 @@ const PomodoroScreen = () => {
             startTime: Date.now(),
             duration: duration * 60,
             type,
-            isTest: false,
           }),
         );
 
@@ -212,7 +194,7 @@ const PomodoroScreen = () => {
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Error starting session:', error);
-      Alert.alert('오류', '세션 시작 중 오류가 발생했습니다.');
+      showError('세션 시작 중 오류가 발생했습니다.');
     }
   };
 
@@ -224,66 +206,37 @@ const PomodoroScreen = () => {
 
     // 애니메이션 완료 후 다음 세션 시작
     setTimeout(async () => {
-      if (isTestMode) {
-        // 테스트 모드
-        const testSession: PomodoroSession = {
-          id: 'test-session',
-          user_id: user?.id || '',
-          type: nextType,
-          duration_minutes: 0.05,
-          completed_at: null,
-          status: 'active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setSession(testSession);
-        setRemainingSeconds(3);
-        setIsRunning(true);
-        await AsyncStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            sessionId: 'test-session',
-            startTime: Date.now(),
-            duration: 3,
-            type: nextType,
-            isTest: true,
-          }),
+      try {
+        const duration = nextType === 'study' ? settings.study_duration : settings.break_duration;
+        const data = await apiFetch<{ data?: { session?: PomodoroSession } }>(
+          getApiUrl('/api/pomodoro/sessions'),
+          {
+            method: 'POST',
+            requireAuth: true,
+            body: JSON.stringify({
+              type: nextType,
+              duration_minutes: duration,
+            }),
+          },
         );
-      } else {
-        // 일반 모드
-        try {
-          const duration = nextType === 'study' ? settings.study_duration : settings.break_duration;
-          const data = await apiFetch<{ data?: { session?: PomodoroSession } }>(
-            getApiUrl('/api/pomodoro/sessions'),
-            {
-              method: 'POST',
-              requireAuth: true,
-              body: JSON.stringify({
-                type: nextType,
-                duration_minutes: duration,
-              }),
-            },
+        if (data.data?.session) {
+          const newSession = data.data.session;
+          setSession(newSession);
+          setRemainingSeconds(duration * 60);
+          setIsRunning(true);
+          await AsyncStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              sessionId: newSession.id,
+              startTime: Date.now(),
+              duration: duration * 60,
+              type: nextType,
+            }),
           );
-          if (data.data?.session) {
-            const newSession = data.data.session;
-            setSession(newSession);
-            setRemainingSeconds(duration * 60);
-            setIsRunning(true);
-            await AsyncStorage.setItem(
-              STORAGE_KEY,
-              JSON.stringify({
-                sessionId: newSession.id,
-                startTime: Date.now(),
-                duration: duration * 60,
-                type: nextType,
-                isTest: false,
-              }),
-            );
-          }
-        } catch (error) {
-          // eslint-disable-next-line no-console
-          console.error('Error starting next session:', error);
         }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Error starting next session:', error);
       }
     }, 1500); // 체크 애니메이션 완료 후 시작
   };
@@ -296,23 +249,6 @@ const PomodoroScreen = () => {
 
     // 완료 애니메이션 표시
     setShowCompletionAnimation(true);
-
-    // 테스트 모드인 경우 API 호출 없이 바로 완료 처리
-    if (isTestMode) {
-      // 자동 전환이 활성화되어 있으면 다음 세션 시작
-      if (autoContinue) {
-        startNextSession(currentType);
-      } else {
-        setTimeout(() => {
-          setSession(null);
-          setRemainingSeconds(0);
-          setIsRunning(false);
-          setIsTestMode(false);
-          AsyncStorage.removeItem(STORAGE_KEY);
-        }, 2000);
-      }
-      return;
-    }
 
     try {
       await apiFetch(getApiUrl(`/api/pomodoro/sessions/${session.id}/complete`), {
@@ -349,51 +285,37 @@ const PomodoroScreen = () => {
     }
   };
 
+  const performCancelSession = async () => {
+    if (!session) return;
+    try {
+      await apiFetch(getApiUrl(`/api/pomodoro/sessions/${session.id}/cancel`), {
+        method: 'PUT',
+        requireAuth: true,
+      });
+      setSession(null);
+      setRemainingSeconds(0);
+      setIsRunning(false);
+      await AsyncStorage.removeItem(STORAGE_KEY);
+
+      // 공부 세션 취소 시 진행 중 알림 정리
+      if (session.type === 'study') {
+        try {
+          await Notifications.dismissAllNotificationsAsync();
+        } catch {
+          // 무시
+        }
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error cancelling session:', error);
+      showError('세션 취소 중 오류가 발생했습니다.');
+    }
+  };
+
   // 세션 취소
   const handleCancelSession = async () => {
     if (!session) return;
-
-    Alert.alert('세션 취소', '정말 세션을 취소하시겠습니까?', [
-      { text: '아니오', style: 'cancel' },
-      {
-        text: '예',
-        style: 'destructive',
-        onPress: async () => {
-          // 테스트 모드인 경우 API 호출 없이 바로 취소 처리
-          if (isTestMode) {
-            setSession(null);
-            setRemainingSeconds(0);
-            setIsRunning(false);
-            setIsTestMode(false);
-            await AsyncStorage.removeItem(STORAGE_KEY);
-            return;
-          }
-
-          try {
-            await apiFetch(getApiUrl(`/api/pomodoro/sessions/${session.id}/cancel`), {
-              method: 'PUT',
-              requireAuth: true,
-            });
-            setSession(null);
-            setRemainingSeconds(0);
-            setIsRunning(false);
-            await AsyncStorage.removeItem(STORAGE_KEY);
-
-            // 공부 세션 취소 시 진행 중 알림 정리
-            if (session.type === 'study') {
-              try {
-                await Notifications.dismissAllNotificationsAsync();
-              } catch {
-                // 무시
-              }
-            }
-          } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error('Error cancelling session:', error);
-          }
-        },
-      },
-    ]);
+    setCancelConfirmVisible(true);
   };
 
   // 타이머 로직
@@ -458,7 +380,7 @@ const PomodoroScreen = () => {
     if (user) {
       setLoading(true);
       fetchSettings();
-      // 저장된 세션 복원 (포모도로 탭/그룹챗 공유)
+      // 저장된 세션 복원 (포모도로 탭 내부 세션 유지)
       AsyncStorage.getItem(STORAGE_KEY).then(value => {
         if (value) {
           const data = JSON.parse(value) as {
@@ -523,6 +445,8 @@ const PomodoroScreen = () => {
     return `${year}.${month}.${day}`;
   };
 
+  const hasTodayProgress = todayCycleCount > 0 || todayStudyMinutes > 0;
+
   const getProgress = () => {
     if (!session) return 0;
     const total = session.duration_minutes * 60;
@@ -541,7 +465,10 @@ const PomodoroScreen = () => {
 
   return (
     <View
-      style={[styles.container, { backgroundColor: isDark ? Colors.dark.background : colors.background }]}
+      style={[
+        styles.container,
+        { backgroundColor: isDark ? Colors.dark.background : colors.background },
+      ]}
     >
       <View
         style={[
@@ -555,13 +482,6 @@ const PomodoroScreen = () => {
         <Text style={[styles.title, { color: isDark ? colors.white : colors.textPrimary }]}>
           포모도로 타이머
         </Text>
-        <TouchableOpacity onPress={() => setShowSettings(!showSettings)}>
-          <IconSymbol
-            name='settings'
-            size={24}
-            color={isDark ? colors.white : colors.textPrimary}
-          />
-        </TouchableOpacity>
       </View>
 
       <View
@@ -575,41 +495,83 @@ const PomodoroScreen = () => {
       >
         <View style={styles.dailyStatsHeader}>
           <Text
-            style={[styles.dailyStatsRange, { color: isDark ? colors.gray300 : colors.textSecondary }]}
+            style={[
+              styles.dailyStatsRange,
+              { color: isDark ? colors.gray300 : colors.textSecondary },
+            ]}
           >
             {formatTodayRange()}
           </Text>
         </View>
-        <View style={styles.dailyStatsRow}>
-          <View
-            style={[
-              styles.dailyStatBox,
-              { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
-            ]}
-          >
-            <Text
-              style={[styles.dailyStatLabel, { color: isDark ? colors.gray300 : colors.textSecondary }]}
+        {(todayStatsLoading || hasTodayProgress) && (
+          <View style={styles.dailyStatsRow}>
+            <View
+              style={[
+                styles.dailyStatBox,
+                { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
+              ]}
             >
-              완료 세트
-            </Text>
-            <Text style={[styles.dailyStatValue, { color: isDark ? colors.white : colors.textPrimary }]}>
-              {todayStatsLoading ? '-' : `${todayCycleCount}회`}
-            </Text>
+              <Text
+                style={[
+                  styles.dailyStatLabel,
+                  { color: isDark ? colors.gray300 : colors.textSecondary },
+                ]}
+              >
+                완료 세트
+              </Text>
+              <Text
+                style={[
+                  styles.dailyStatValue,
+                  { color: isDark ? colors.white : colors.textPrimary },
+                ]}
+              >
+                {todayStatsLoading ? '-' : `${todayCycleCount}회`}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.dailyStatBox,
+                { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.dailyStatLabel,
+                  { color: isDark ? colors.gray300 : colors.textSecondary },
+                ]}
+              >
+                공부 시간
+              </Text>
+              <Text
+                style={[
+                  styles.dailyStatValue,
+                  { color: isDark ? colors.white : colors.textPrimary },
+                ]}
+              >
+                {todayStatsLoading ? '-' : formatMinutes(todayStudyMinutes)}
+              </Text>
+            </View>
           </View>
-          <View
-            style={[
-              styles.dailyStatBox,
-              { backgroundColor: isDark ? colors.gray900 : colors.gray100 },
-            ]}
-          >
-            <Text
-              style={[styles.dailyStatLabel, { color: isDark ? colors.gray300 : colors.textSecondary }]}
-            >
-              공부 시간
-            </Text>
-            <Text style={[styles.dailyStatValue, { color: isDark ? colors.white : colors.textPrimary }]}>
-              {todayStatsLoading ? '-' : formatMinutes(todayStudyMinutes)}
-            </Text>
+        )}
+        {/* 공부/휴식 시간 설정 (상단에서 바로 적용) */}
+        <View style={styles.settingsRow}>
+          <View style={styles.settingsItem}>
+            <MinutePicker
+              label='공부 시간'
+              value={settings.study_duration}
+              onChange={minutes => setSettings(prev => ({ ...prev, study_duration: minutes }))}
+              minimumValue={1}
+              maximumValue={1440}
+            />
+          </View>
+          <View style={styles.settingsItem}>
+            <MinutePicker
+              label='휴식 시간'
+              value={settings.break_duration}
+              onChange={minutes => setSettings(prev => ({ ...prev, break_duration: minutes }))}
+              minimumValue={1}
+              maximumValue={1440}
+            />
           </View>
         </View>
       </View>
@@ -632,7 +594,10 @@ const PomodoroScreen = () => {
                     {formatTime(remainingSeconds)}
                   </Text>
                   <Text
-                    style={[styles.sessionType, { color: isDark ? colors.gray300 : colors.textSecondary }]}
+                    style={[
+                      styles.sessionType,
+                      { color: isDark ? colors.gray300 : colors.textSecondary },
+                    ]}
                   >
                     {session.type === 'study' ? '공부' : '휴식'}
                   </Text>
@@ -678,7 +643,9 @@ const PomodoroScreen = () => {
           </>
         ) : (
           <View style={styles.startContainer}>
-            <Text style={[styles.startTitle, { color: isDark ? colors.white : colors.textPrimary }]}>
+            <Text
+              style={[styles.startTitle, { color: isDark ? colors.white : colors.textPrimary }]}
+            >
               세션 시작하기
             </Text>
             <TouchableOpacity
@@ -693,76 +660,40 @@ const PomodoroScreen = () => {
             >
               <Text style={styles.startButtonText}>휴식 시작</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.testButton, { backgroundColor: colors.gray400 }]}
-              onPress={handleStartTestSession}
-            >
-              <Text style={styles.testButtonText}>테스트 (3초)</Text>
-            </TouchableOpacity>
           </View>
         )}
       </View>
 
-      {/* 설정 모달 */}
-      <Modal
-        transparent
-        visible={showSettings}
+      {/* 세션 취소 확인 모달 */}
+      <AppModal
+        visible={cancelConfirmVisible}
+        onRequestClose={() => setCancelConfirmVisible(false)}
+        title='세션 취소'
+        subtitle='정말 세션을 취소하시겠습니까?'
         animationType='fade'
-        onRequestClose={() => setShowSettings(false)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowSettings(false)}>
-          <Pressable
-            style={[styles.modalContent, { backgroundColor: isDark ? colors.gray800 : colors.white }]}
-            onPress={e => e.stopPropagation()}
-          >
-            <View
-              style={[
-                styles.modalHeader,
-                { borderBottomColor: isDark ? colors.gray700 : colors.gray200 },
-              ]}
-            >
-              <Text style={[styles.modalTitle, { color: isDark ? colors.white : colors.textPrimary }]}>
-                포모도로 설정
-              </Text>
-              <TouchableOpacity onPress={() => setShowSettings(false)}>
-                <IconSymbol
-                  name='close'
-                  size={24}
-                  color={isDark ? colors.white : colors.textPrimary}
-                />
-              </TouchableOpacity>
-            </View>
+        type='confirmCancel'
+        confirmText='예'
+        cancelText='아니오'
+        confirmVariant='danger'
+        onConfirm={async () => {
+          setCancelConfirmVisible(false);
+          await performCancelSession();
+        }}
+        onCancel={() => setCancelConfirmVisible(false)}
+      />
 
-            <ScrollView style={styles.settingsContent}>
-              <MinutePicker
-                label='공부 시간'
-                value={tempSettings.study_duration}
-                onChange={minutes => setTempSettings({ ...tempSettings, study_duration: minutes })}
-                minimumValue={1}
-                maximumValue={1440}
-              />
-
-              <MinutePicker
-                label='휴식 시간'
-                value={tempSettings.break_duration}
-                onChange={minutes => setTempSettings({ ...tempSettings, break_duration: minutes })}
-                minimumValue={1}
-                maximumValue={1440}
-              />
-
-              <TouchableOpacity
-                style={[styles.saveButton, savingSettings && styles.saveButtonDisabled]}
-                onPress={handleSaveSettings}
-                disabled={savingSettings}
-              >
-                <Text style={styles.saveButtonText}>
-                  {savingSettings ? '저장 중...' : '설정 저장'}
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* 공통 오류/알림 모달 */}
+      <AppModal
+        visible={alertModal.visible}
+        onRequestClose={closeAlertModal}
+        title={alertModal.title}
+        subtitle={alertModal.message}
+        animationType='fade'
+        type='confirm'
+        confirmText='확인'
+        confirmVariant={alertModal.variant === 'danger' ? 'danger' : 'primary'}
+        onConfirm={closeAlertModal}
+      />
     </View>
   );
 };
@@ -772,9 +703,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     minHeight: 48,
@@ -922,7 +850,7 @@ const styles = StyleSheet.create({
   dailyStatsContainer: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 16,
+    paddingBottom: 8,
     borderBottomWidth: 1,
   },
   dailyStatsHeader: {
@@ -956,6 +884,15 @@ const styles = StyleSheet.create({
   dailyStatValue: {
     fontSize: 18,
     fontWeight: '700',
+  },
+  settingsRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  settingsItem: {
+    flex: 1,
   },
 });
 
